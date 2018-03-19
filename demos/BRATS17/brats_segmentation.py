@@ -17,6 +17,7 @@ from niftynet.layer.mean_variance_normalisation import \
     MeanVarNormalisationLayer
 from niftynet.layer.pad import PadLayer
 from niftynet.layer.post_processing import PostProcessingLayer
+from niftynet.layer.loss_segmentation import dice_dense
 
 SUPPORTED_INPUT = set(['image', 'label'])
 
@@ -24,10 +25,10 @@ SUPPORTED_INPUT = set(['image', 'label'])
 class BRATSApp(BaseApplication):
     REQUIRED_CONFIG_SECTION = "SEGMENTATION"
 
-    def __init__(self, net_param, action_param, is_training):
+    def __init__(self, net_param, action_param, action):
         BaseApplication.__init__(self)
         tf.logging.info('starting BRATS segmentation app')
-        self.is_training = is_training
+        self.action = action
 
         self.net_param = net_param
         self.action_param = action_param
@@ -155,9 +156,14 @@ class BRATSApp(BaseApplication):
             loss_func = LossFunction(
                 n_class=self.segmentation_param.num_classes,
                 loss_type=self.action_param.loss_type)
+            tf.logging.info('Size of net_out %s' % net_out.shape)
+            # ground_truth = data_dict.get('label', None)[:, :, :, 50]
+            ground_truth = data_dict.get('label', None)
+            tf.logging.info('net_out %s' % net_out.shape)
+            tf.logging.info('ground_truth %s' % ground_truth.shape)
             data_loss = loss_func(
                 prediction=net_out,
-                ground_truth=data_dict.get('label', None),
+                ground_truth=ground_truth,
                 weight_map=data_dict.get('weight', None))
             reg_losses = tf.get_collection(
                 tf.GraphKeys.REGULARIZATION_LOSSES)
@@ -171,12 +177,50 @@ class BRATSApp(BaseApplication):
             # collecting gradients variables
             gradients_collector.add_to_collection([grads])
             # collecting output variables
+            tf.logging.info('net_out %s' % net_out.shape)
+            tf.logging.info('ground_truth %s' % ground_truth.shape)
+            tf.logging.info('image %s' % image.shape)
+            one_hot_ground_truth = tf.squeeze(tf.one_hot(tf.cast(ground_truth, tf.uint8), 2))
+            tf.logging.info('one_hot_ground_truth %s' % one_hot_ground_truth.shape)
             outputs_collector.add_to_collection(
                 var=data_loss, name='dice_loss',
                 average_over_devices=False, collection=CONSOLE)
             outputs_collector.add_to_collection(
                 var=data_loss, name='dice_loss',
                 average_over_devices=True, summary_type='scalar',
+                collection=TF_SUMMARIES)
+            outputs_collector.add_to_collection(
+                var=dice_dense(net_out, one_hot_ground_truth), name='dice_similarity',
+                average_over_devices=True, summary_type='scalar',
+                collection=TF_SUMMARIES)
+            outputs_collector.add_to_collection(
+                var=dice_dense(net_out, one_hot_ground_truth), name='dice_similarity',
+                average_over_devices=True, summary_type='scalar',
+                collection=CONSOLE)
+            #Flair,T1,T1c,T2
+            outputs_collector.add_to_collection(
+                var=tf.expand_dims(image[:, :, :, 0], -1), name='Flair',
+                average_over_devices=True, summary_type='image',
+                collection=TF_SUMMARIES)
+            outputs_collector.add_to_collection(
+                var=tf.expand_dims(image[:, :, :, 1], -1), name='T1',
+                average_over_devices=True, summary_type='image',
+                collection=TF_SUMMARIES)
+            outputs_collector.add_to_collection(
+                var=tf.expand_dims(image[:, :, :, 2], -1), name='T1c',
+                average_over_devices=True, summary_type='image',
+                collection=TF_SUMMARIES)
+            outputs_collector.add_to_collection(
+                var=tf.expand_dims(image[:, :, :, 3], -1), name='T2',
+                average_over_devices=True, summary_type='image',
+                collection=TF_SUMMARIES)
+            outputs_collector.add_to_collection(
+                var=ground_truth, name='ground truth',
+                average_over_devices=True, summary_type='image',
+                collection=TF_SUMMARIES)
+            outputs_collector.add_to_collection(
+                var=tf.expand_dims(net_out[:, :, :, 1], -1), name='net_out',
+                average_over_devices=True, summary_type='image',
                 collection=TF_SUMMARIES)
         else:
             # converting logits into final output for
