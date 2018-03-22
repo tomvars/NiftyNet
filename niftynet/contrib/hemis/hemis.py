@@ -376,7 +376,7 @@ class HighRes3dFrontendBlock(BaseNet):
         fc_layer = ConvolutionalLayer(
             n_output_chns=params['n_features'],
             kernel_size=params['kernel_size'],
-            acti_func=None,
+            acti_func='softmax',
             w_initializer=self.initializers['w'],
             w_regularizer=self.regularizers['w'],
             name=params['name'])

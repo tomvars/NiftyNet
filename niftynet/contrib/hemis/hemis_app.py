@@ -1,4 +1,7 @@
 import tensorflow as tf
+import sys
+import os
+sys.path.append(os.getcwd())
 
 from niftynet.application.base_application import BaseApplication
 from niftynet.engine.application_factory import \
@@ -6,7 +9,7 @@ from niftynet.engine.application_factory import \
 from niftynet.engine.application_variables import \
     CONSOLE, NETWORK_OUTPUT, TF_SUMMARIES
 from niftynet.engine.sampler_grid import GridSampler
-from niftynet.engine.sampler_uniform import UniformSampler
+from niftynet.contrib.hemis.hemis_sampler import HeMISSampler
 from niftynet.engine.windows_aggregator_grid import GridSamplesAggregator
 from niftynet.io.image_reader import ImageReader
 from niftynet.layer.binary_masking import BinaryMaskingLayer
@@ -17,7 +20,7 @@ from niftynet.layer.mean_variance_normalisation import \
     MeanVarNormalisationLayer
 from niftynet.layer.pad import PadLayer
 from niftynet.layer.post_processing import PostProcessingLayer
-from niftynet.layer.loss_segmentation import dice_dense
+from niftynet.layer.loss_segmentation import dice_dense, dice_nosquare
 
 SUPPORTED_INPUT = set(['image', 'label'])
 
@@ -91,7 +94,7 @@ class BRATSApp(BaseApplication):
 
     def initialise_sampler(self):
         if self.is_training:
-            self.sampler = [[UniformSampler(
+            self.sampler = [[HeMISSampler(
                 reader=reader,
                 data_param=self.data_param,
                 batch_size=self.net_param.batch_size,
@@ -180,8 +183,15 @@ class BRATSApp(BaseApplication):
             tf.logging.info('net_out %s' % net_out.shape)
             tf.logging.info('ground_truth %s' % ground_truth.shape)
             tf.logging.info('image %s' % image.shape)
-            one_hot_ground_truth = tf.squeeze(tf.one_hot(tf.cast(ground_truth, tf.uint8), 2))
+            one_hot_ground_truth = tf.squeeze(
+                tf.one_hot(
+                    tf.cast(ground_truth, tf.uint8), 2
+                )
+            )
             tf.logging.info('one_hot_ground_truth %s' % one_hot_ground_truth.shape)
+            # one_hot_ground_truth = tf.reverse(one_hot_ground_truth, axis=[-1])
+            tf.logging.info('one_hot_ground_truth %s' % one_hot_ground_truth.shape)
+
             outputs_collector.add_to_collection(
                 var=data_loss, name='dice_loss',
                 average_over_devices=False, collection=CONSOLE)
@@ -197,6 +207,36 @@ class BRATSApp(BaseApplication):
                 var=dice_dense(net_out, one_hot_ground_truth), name='dice_similarity',
                 average_over_devices=True, summary_type='scalar',
                 collection=CONSOLE)
+
+            def dice_nosquare(prediction, one_hot):
+                """
+                Function to calculate the classical dice loss
+
+                :param prediction: the logits
+                :param ground_truth: the segmentation ground_truth
+                :param weight_map:
+                :return: the loss
+                """
+
+                dice_numerator = 2.0 * tf.reduce_sum(one_hot * prediction, reduction_indices=[0])
+                dice_denominator = tf.reduce_sum(prediction, reduction_indices=[0]) + \
+                                   tf.reduce_sum(one_hot, reduction_indices=[0])
+                epsilon_denominator = 0.00001
+
+                dice_score = dice_numerator / (dice_denominator + epsilon_denominator)
+                # dice_score.set_shape([n_classes])
+                # minimising (1 - dice_coefficients)
+                return tf.reduce_mean(dice_score)
+
+            outputs_collector.add_to_collection(
+                var=dice_nosquare(prediction=net_out, one_hot=one_hot_ground_truth), name='dice_score',
+                average_over_devices=True, summary_type='scalar',
+                collection=TF_SUMMARIES)
+            outputs_collector.add_to_collection(
+                var=dice_nosquare(prediction=net_out, one_hot=one_hot_ground_truth), name='dice_score',
+                average_over_devices=True, summary_type='scalar',
+                collection=CONSOLE)
+
             #Flair,T1,T1c,T2
             outputs_collector.add_to_collection(
                 var=tf.expand_dims(image[:, :, :, 0], -1), name='Flair',
@@ -215,7 +255,7 @@ class BRATSApp(BaseApplication):
                 average_over_devices=True, summary_type='image',
                 collection=TF_SUMMARIES)
             outputs_collector.add_to_collection(
-                var=ground_truth, name='ground truth',
+                var=ground_truth, name='ground_truth',
                 average_over_devices=True, summary_type='image',
                 collection=TF_SUMMARIES)
             outputs_collector.add_to_collection(
