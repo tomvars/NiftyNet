@@ -157,7 +157,6 @@ class BRATSApp(BaseApplication):
                 n_class=self.segmentation_param.num_classes,
                 loss_type=self.action_param.loss_type)
             tf.logging.info('Size of net_out %s' % net_out.shape)
-            # ground_truth = data_dict.get('label', None)[:, :, :, 50]
             ground_truth = data_dict.get('label', None)
             tf.logging.info('net_out %s' % net_out.shape)
             tf.logging.info('ground_truth %s' % ground_truth.shape)

@@ -112,6 +112,7 @@ class HeMIS(BaseNet):
         tf.logging.info('Frontend output dims: %s' % frontend_tensor.shape)
         return frontend_tensor
 
+
 class HeMISBackendBlock(TrainableLayer):
     """
     This class defines the entire HeMIS backend for one image modality.
