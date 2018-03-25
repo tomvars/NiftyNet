@@ -73,6 +73,7 @@ class ClassificationApplication(BaseApplication):
         # read each line of csv files into an instance of Subject
         if self.is_training:
             self.readers = []
+            print(file_lists)
             for file_list in file_lists:
                 reader = ImageReader(['image', 'label', 'sampler'])
                 reader.initialise(data_param, task_param, file_list)
