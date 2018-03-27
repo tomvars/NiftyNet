@@ -15,6 +15,7 @@ from niftynet.engine.application_factory import \
 from niftynet.engine.application_variables import \
     CONSOLE, NETWORK_OUTPUT, TF_SUMMARIES
 from niftynet.engine.sampler_resize import ResizeSampler
+from niftynet.engine.sampler_uniform import UniformSampler
 from niftynet.engine.windows_aggregator_classifier import \
     ClassifierSamplesAggregator
 from niftynet.io.image_reader import ImageReader
@@ -61,6 +62,8 @@ class ClassificationApplication(BaseApplication):
         self.SUPPORTED_SAMPLING = {
             'resize': (self.initialise_resize_sampler,
                        self.initialise_resize_sampler),
+            'uniform': (self.initialise_resize_sampler,
+                        self.initialise_resize_sampler),
         }
 
     def initialise_dataset_loader(
@@ -73,7 +76,6 @@ class ClassificationApplication(BaseApplication):
         # read each line of csv files into an instance of Subject
         if self.is_training:
             self.readers = []
-            print(file_lists)
             for file_list in file_lists:
                 reader = ImageReader(['image', 'label', 'sampler'])
                 reader.initialise(data_param, task_param, file_list)
@@ -164,6 +166,15 @@ class ClassificationApplication(BaseApplication):
             shuffle_buffer=self.is_training,
             queue_length=self.net_param.queue_length) for reader in
                          self.readers]]
+
+    def initialise_uniform_sampler(self):
+        self.sampler = [[UniformSampler(
+            reader=reader,
+            data_param=self.data_param,
+            batch_size=self.net_param.batch_size,
+            windows_per_image=self.action_param.sample_per_volume,
+            queue_length=self.net_param.queue_length) for reader in
+            self.readers]]
 
     def initialise_aggregator(self):
         self.output_decoder = ClassifierSamplesAggregator(
@@ -259,8 +270,10 @@ class ClassificationApplication(BaseApplication):
             else:
                 data_dict = switch_sampler(for_training=True)
             image = tf.cast(data_dict['image'], tf.float32)
+            tf.logging.info('image shape: {}'.format(image.shape))
             net_out = self.net(image, is_training=self.is_training)
-
+            tf.logging.info('label shape: {}'.format(data_dict.get('label', None).shape))
+            tf.logging.info('net_out shape: {}'.format(net_out.shape))
             with tf.name_scope('Optimiser'):
                 optimiser_class = OptimiserFactory.create(
                     name=self.action_param.optimiser)

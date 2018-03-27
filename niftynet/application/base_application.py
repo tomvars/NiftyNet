@@ -172,7 +172,6 @@ class BaseApplication(with_metaclass(SingletonApplication, object)):
         :param name:  name of input parameter to copy parameters from
         :return: modified data_param and task_param
         """
-        print(task_param)
         # Add the data parameter
         if 'inferred' not in data_param:
             data_name = vars(task_param)[name][0]

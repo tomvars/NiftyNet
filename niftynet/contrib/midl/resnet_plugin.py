@@ -8,9 +8,9 @@ import tensorflow as tf
 
 from niftynet.layer import layer_util
 from niftynet.layer.bn import BNLayer
-from niftynet.layer.fully_connected import FCLayer
+from niftynet.layer.fully_connected import FCLayer, FullyConnectedLayer
 from niftynet.layer.base_layer import TrainableLayer
-from cell_count.convolution import ConvolutionalLayer
+from niftynet.contrib.midl.convolution import ConvolutionalLayer
 from niftynet.layer.deconvolution import DeconvLayer
 from niftynet.layer.elementwise import ElementwiseLayer
 from niftynet.network.base_net import BaseNet
@@ -55,7 +55,7 @@ class ResNet(BaseNet):
 
     def create(self):
         bn=BNLayer()
-        fc=FCLayer(self.num_classes)
+        fc=FullyConnectedLayer(self.num_classes)
         conv1=self.Conv(self.n_features[0], acti_func=None, with_bn=False)
         blocks=[]
         blocks+=[DownResBlock(self.n_features[1], self.n_blocks_per_resolution, 1, self.Conv)]
@@ -68,8 +68,11 @@ class ResNet(BaseNet):
         out = layers.conv1(images, is_training)
         for block in layers.blocks:
             out = block(out, is_training)
-        out = tf.reduce_mean(tf.nn.relu(layers.bn(out, is_training)),axis=[1,2,3])
-        return layers.fc(out)
+        out = tf.expand_dims(tf.reduce_mean(tf.nn.relu(layers.bn(out, is_training)),axis=[1,2,3]), axis=[-1])
+        tf.logging.info('{} shape: {}'.format(out.name, out.shape))
+        out =  layers.fc(out)
+        tf.logging.info('{} shape: {}'.format(out.name, out.shape))
+        return out
         
 
 
@@ -114,7 +117,7 @@ class BottleneckBlock(TrainableLayer):
             out=layers.conv[1](out, is_training)
             out=layers.conv[2](out, is_training)
             out = layers.conv_shortcut(tmp, is_training) + out
-        print(out.shape)
+        tf.logging.info('{} shape: {}'.format(out.name, out.shape))
         return out
 
 DownResBlockDesc = namedtuple('DownResBlockDesc', ['blocks'])
