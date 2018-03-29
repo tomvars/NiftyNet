@@ -12,8 +12,6 @@ import tensorflow as tf
 from niftynet.engine.image_window import ImageWindow, N_SPATIAL
 from niftynet.engine.image_window_buffer import InputBatchQueueRunner
 from niftynet.layer.base_layer import Layer
-from niftynet.engine.sampler_uniform import rand_spatial_coordinates
-
 
 # pylint: disable=too-many-arguments
 
@@ -129,3 +127,63 @@ class HeMISSampler(Layer, InputBatchQueueRunner):
             # [enqueue_batch_size, x, y, z, time, modality]
             # where enqueue_batch_size = windows_per_image
             yield output_dict
+
+def rand_spatial_coordinates(subject_id,
+                             data,
+                             img_sizes,
+                             win_sizes,
+                             n_samples=1):
+    """
+    ``win_sizes`` could be different (for example in segmentation network
+    input image window size is ``32x32x10``,
+    training label window is ``16x16x10`` -- the network reduces x-y plane
+    spatial resolution.)
+
+    This function handles this situation by first find the largest
+    window across these window definitions, and generate the coordinates.
+    These coordinates are then adjusted for each of the
+    smaller window sizes (the output windows are concentric).
+    """
+    assert data is not None, "No input from image reader. Please check" \
+                             "the configuration file."
+    n_samples = max(n_samples, 1)
+    uniq_spatial_size = set([img_size[:N_SPATIAL]
+                             for img_size in list(img_sizes.values())])
+    if len(uniq_spatial_size) > 1:
+        tf.logging.fatal("Don't know how to generate sampling "
+                         "locations: Spatial dimensions of the "
+                         "grouped input sources are not "
+                         "consistent. %s", uniq_spatial_size)
+        raise NotImplementedError
+    uniq_spatial_size = uniq_spatial_size.pop()
+
+    # find spatial window location based on the largest spatial window
+    spatial_win_sizes = [win_size[:N_SPATIAL]
+                         for win_size in win_sizes.values()]
+    spatial_win_sizes = np.asarray(spatial_win_sizes, dtype=np.int32)
+    max_spatial_win = np.max(spatial_win_sizes, axis=0)
+    max_coords = np.zeros((n_samples, N_SPATIAL), dtype=np.int32)
+    for i in range(0, N_SPATIAL):
+        assert uniq_spatial_size[i] >= max_spatial_win[i], \
+            "window size {} is larger than image size {}".format(
+                max_spatial_win[i], uniq_spatial_size[i])
+        max_coords[:, i] = np.random.randint(
+            0, max(uniq_spatial_size[i] - max_spatial_win[i], 1), n_samples)
+
+    # adjust max spatial coordinates based on each spatial window size
+    all_coordinates = {}
+    for mod in list(win_sizes):
+        win_size = win_sizes[mod][:N_SPATIAL]
+        half_win_diff = np.floor((max_spatial_win - win_size) / 2.0)
+        # shift starting coords of the window
+        # so that smaller windows are centred within the large windows
+        spatial_coords = np.zeros((n_samples, N_SPATIAL * 2), dtype=np.int32)
+        spatial_coords[:, :N_SPATIAL] = \
+            max_coords[:, :N_SPATIAL] + half_win_diff[:N_SPATIAL]
+        spatial_coords[:, N_SPATIAL:] = \
+            spatial_coords[:, :N_SPATIAL] + win_size[:N_SPATIAL]
+        # include the subject id
+        subject_id = np.ones((n_samples,), dtype=np.int32) * subject_id
+        spatial_coords = np.append(subject_id[:, None], spatial_coords, axis=1)
+        all_coordinates[mod] = spatial_coords
+    return all_coordinates

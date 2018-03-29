@@ -235,6 +235,33 @@ def __add_registration_args(parser):
     parser = add_input_name_args(parser, SUPPORTED_INPUT)
     return parser
 
+def __add_multitask_args(parser):
+    parser.add_argument(
+        "--num_classes",
+        metavar='',
+        help="Set number of classes",
+        type=int,
+        default=-1)
+
+    parser.add_argument(
+        "--output_prob",
+        metavar='',
+        help="[Inference only] whether to output multi-class probabilities",
+        type=str2boolean,
+        default=False)
+
+    parser.add_argument(
+        "--label_normalisation",
+        metavar='',
+        help="whether to map unique labels in the training set to "
+             "consecutive integers (the smallest label will be  mapped to 0)",
+        type=str2boolean,
+        default=False)
+
+    from niftynet.contrib.hemis_midl.hemis_app import SUPPORTED_INPUT
+    parser = add_input_name_args(parser, SUPPORTED_INPUT)
+    return parser
+
 
 SUPPORTED_ARG_SECTIONS = {
     'REGRESSION': __add_regression_args,
@@ -242,5 +269,6 @@ SUPPORTED_ARG_SECTIONS = {
     'CLASSIFICATION': __add_classification_args,
     'AUTOENCODER': __add_autoencoder_args,
     'GAN': __add_gan_args,
-    'REGISTRATION': __add_registration_args
+    'REGISTRATION': __add_registration_args,
+    'MULTITASK': __add_multitask_args
 }

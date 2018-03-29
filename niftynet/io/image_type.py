@@ -470,6 +470,9 @@ class SpatialImage3D(SpatialImage2D):
                 tf.logging.fatal(
                     "multi-modal data shapes not consistent -- trying to "
                     "concat {}.".format([mod.shape for mod in mod_list]))
+                tf.logging.fatal(
+                    "The culprit: {}".format(self.file_path)
+                )
                 raise
             return image_data
         # assuming len(self._file_path) == 1

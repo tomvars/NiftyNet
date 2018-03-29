@@ -9,7 +9,7 @@ from niftynet.engine.application_factory import \
 from niftynet.engine.application_variables import \
     CONSOLE, NETWORK_OUTPUT, TF_SUMMARIES
 from niftynet.engine.sampler_grid import GridSampler
-from niftynet.contrib.midl.midl_sampler import MIDLSampler as HeMISSampler
+from niftynet.contrib.hemis_midl.hemis_sampler import HeMISSampler
 from niftynet.engine.windows_aggregator_grid import GridSamplesAggregator
 from niftynet.io.image_reader import ImageReader
 from niftynet.layer.binary_masking import BinaryMaskingLayer
@@ -22,11 +22,11 @@ from niftynet.layer.pad import PadLayer
 from niftynet.layer.post_processing import PostProcessingLayer
 from niftynet.layer.loss_segmentation import dice_dense, dice_nosquare
 
-SUPPORTED_INPUT = set(['image', 'label'])
+SUPPORTED_INPUT = set(['image', 'label', 'modalities'])
 
 
 class BRATSApp(BaseApplication):
-    REQUIRED_CONFIG_SECTION = "SEGMENTATION"
+    REQUIRED_CONFIG_SECTION = "MULTITASK"
 
     def __init__(self, net_param, action_param, action):
         BaseApplication.__init__(self)
@@ -99,7 +99,6 @@ class BRATSApp(BaseApplication):
                 reader=reader,
                 data_param=self.data_param,
                 batch_size=self.net_param.batch_size,
-                number_of_modalities=len(self.segmentation_param.image),
                 windows_per_image=self.action_param.sample_per_volume,
                 queue_length=self.net_param.queue_length) for reader in
                 self.readers]]
