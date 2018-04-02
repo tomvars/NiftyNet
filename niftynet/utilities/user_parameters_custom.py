@@ -237,7 +237,14 @@ def __add_registration_args(parser):
 
 def __add_multitask_args(parser):
     parser.add_argument(
-        "--num_classes",
+        "--num_classes_seg",
+        metavar='',
+        help="Set number of classes",
+        type=int,
+        default=-1)
+
+    parser.add_argument(
+        "--num_classes_classification",
         metavar='',
         help="Set number of classes",
         type=int,

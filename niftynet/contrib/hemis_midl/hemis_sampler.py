@@ -69,9 +69,22 @@ class HeMISSampler(Layer, InputBatchQueueRunner):
         :return: output data dictionary ``{placeholders: data_array}``
         """
         while True:
-            image_id, data, interp_orders = self.reader(shuffle=self.shuffle)
+            try:
+                image_id, data, interp_orders = self.reader(shuffle=self.shuffle)
+            except Exception as e:
+                print('Skipping image_id: {}, because of {}'.format(image_id, e))
             if not data:
                 break
+            ##### RANDOM ORDER (add random dropping in the future) #####
+            random_order = np.random.permutation(data['image'].shape[-1])
+
+            data['image'] = data['image'][:, :, :, :, random_order]
+            if data['modalities'].shape[2] == 9:
+                data['modalities'] = data['modalities'][:, :, random_order, :, :]
+            else:
+                print(image_id, data['modalities'].shape)
+                continue
+            ############################################################
             image_shapes = \
                 dict((name, data[name].shape) for name in self.window.names)
             # window shapes can be dynamic, here they

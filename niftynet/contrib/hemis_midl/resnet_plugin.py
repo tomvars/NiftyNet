@@ -7,12 +7,13 @@ from collections import namedtuple
 import tensorflow as tf
 
 from niftynet.layer import layer_util
-from niftynet.layer.bn import BNLayer
+from niftynet.contrib.hemis_midl.bn import BNLayer
 from niftynet.layer.fully_connected import FCLayer, FullyConnectedLayer
 from niftynet.layer.base_layer import TrainableLayer
-from niftynet.contrib.midl.convolution import ConvolutionalLayer
+from niftynet.contrib.hemis_midl.convolution import ConvolutionalLayer
 from niftynet.layer.deconvolution import DeconvLayer
 from niftynet.layer.elementwise import ElementwiseLayer
+from niftynet.layer.activation import ActiLayer
 from niftynet.network.base_net import BaseNet
 from niftynet.utilities.util_common import look_up_operations
 
@@ -70,8 +71,9 @@ class ResNet(BaseNet):
             out = block(out, is_training)
         out = tf.expand_dims(tf.reduce_mean(tf.nn.relu(layers.bn(out, is_training)),axis=[1,2,3]), axis=[-1])
         tf.logging.info('{} shape: {}'.format(out.name, out.shape))
-        out =  layers.fc(out)
+        out = layers.fc(out)
         tf.logging.info('{} shape: {}'.format(out.name, out.shape))
+        out = ActiLayer('softmax')(out)
         return out
         
 

@@ -13,6 +13,10 @@ from niftynet.layer import layer_util
 from niftynet.network.highres3dnet import HighResBlock
 from niftynet.layer.dilatedcontext import DilatedTensor
 from niftynet.contrib.hemis_midl.resnet_plugin import ResNet
+from niftynet.contrib.hemis_midl.toynet import ToyNet
+
+from niftynet.engine.application_variables import \
+    CONSOLE, NETWORK_OUTPUT, TF_SUMMARIES
 
 class HeMIS(BaseNet):
     """
@@ -81,17 +85,49 @@ class HeMIS(BaseNet):
         ]
         self.num_classes = num_classes
 
-    def layer_op(self, input_tensor, is_training, layer_id=-1):
-        n_modalities = input_tensor.shape.as_list()[-1]
+    def layer_op(self, input_tensor, is_training, outputs_collector=None):
+        # n_modalities = input_tensor.shape.as_list()[-1]
+        n_modalities = 4
+        n_ims_per_subj = input_tensor.shape.as_list()[-1]
+        n_subj_in_batch = input_tensor.shape.as_list()[0]
         tf.logging.info('Input tensor dims: %s' % input_tensor.shape)
+        modality_scores = []
+        with tf.variable_scope('modality_classifier') as scope:
+            modality_classifier = ToyNet(n_modalities,
+                                         w_regularizer=self.regularizers['w'],
+                                         b_regularizer=self.regularizers['b'])
+            for i in range(n_ims_per_subj):
+                #### Do this conditionally? #####
+                # modality_classifier = ResNet(n_modalities)
+                scope.reuse_variables()
+                null_output = [[1.0 if _modality == 0 else 0.0 for _modality in range(n_modalities)] for _ in range(n_subj_in_batch)]
+                # null_output = [[0.0 for _modality in range(n_modalities)] for _ in range(n_subj_in_batch)]
+                # cond = tf.logical_not(
+                #     tf.reduce_all(
+                #         tf.equal(input_tensor[:, :, :, i], tf.zeros(shape=input_tensor[:, :, :, i].shape.as_list())))
+                # )
+                # out = tf.cond(cond,
+                #               false_fn=lambda: tf.constant(null_output),
+                #               true_fn=lambda: modality_classifier(tf.expand_dims(input_tensor[:, :, :, i], -1), is_training))
+                out = modality_classifier(tf.expand_dims(input_tensor[:, :, :, i], -1), is_training)
+                # out = tf.constant(null_output)
 
+                modality_scores.append(out)
+        modality_tensor = tf.expand_dims(tf.expand_dims(tf.stack(modality_scores, axis=-1), axis=2), axis=2)
+        expanded_input_tensor = tf.expand_dims(input_tensor, axis=1)
+        attention_tensor = tf.reduce_sum(tf.multiply(expanded_input_tensor, modality_tensor), axis=-1)
+        normalization_tensor = tf.reduce_sum(modality_tensor, axis=-1)
+        attention_tensor = attention_tensor/normalization_tensor
+        attention_tensor = tf.transpose(attention_tensor, [0, 2, 3, 1], name='attention_tensor')
         backend_outputs = []
         # Loop through each modality, compute the backend tensor of each one.
         for modality in range(n_modalities):
-            _single_modality_backend_tensor = HeMISBackendBlock(layers=self.backend_layers, name='HeMISBackendBlock_' + str(modality))
+            _single_modality_backend_tensor = HeMISBackendBlock(layers=self.backend_layers,
+                                                                name='HeMISBackendBlock_' + str(modality),
+                                                                w_regularizer=self.regularizers['w'])
             # _single_modality_backend_tensor = HighRes3dBackendBlock(name='HighRes3dBackendBlock_' + str(modality))
-            tf.logging.info('modality tensor input: %s' % input_tensor[:, :, :, modality])
-            _tensor = _single_modality_backend_tensor(tf.expand_dims(input_tensor[:, :, :, modality], -1), is_training)
+            tf.logging.info('attention_tensor input: %s' % attention_tensor[:, :, :, modality])
+            _tensor = _single_modality_backend_tensor(tf.expand_dims(attention_tensor[:, :, :, modality], -1), is_training)
             # _tensor = _single_modality_backend_tensor(input_tensor[:, :, :, :, modality], is_training)
             tf.logging.info('Modality tensor dims: %s' % _tensor.shape)
             backend_outputs.append(_tensor)
@@ -106,10 +142,12 @@ class HeMIS(BaseNet):
         abstraction_tensor = abstraction_op(full_backend_tensor, is_training)
         tf.logging.info('Abstraction output dims: %s' % abstraction_tensor.shape)
         # frontend_op = HeMISFrontendBlock(layers=self.frontend_layers)
-        frontend_op = HighRes3dFrontendBlock(num_classes=self.num_classes)
+        frontend_op = HighRes3dFrontendBlock(num_classes=self.num_classes,
+                                             w_regularizer = self.regularizers['w'])
         frontend_tensor = frontend_op(abstraction_tensor, is_training)
         tf.logging.info('Frontend output dims: %s' % frontend_tensor.shape)
-        return frontend_tensor
+        return frontend_tensor, tf.reshape(tf.transpose(tf.stack(modality_scores, axis=-1), [0, 2, 1]),
+                                           shape=[n_subj_in_batch*n_ims_per_subj, n_modalities])
 
 
 class HeMISBackendBlock(TrainableLayer):
