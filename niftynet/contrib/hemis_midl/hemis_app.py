@@ -40,6 +40,7 @@ class BRATSApp(BaseApplication):
 
         self.data_param = None
         self.segmentation_param = None
+        self.current_iter = None
 
     def initialise_dataset_loader(
             self, data_param=None, task_param=None, data_partitioner=None):
@@ -152,6 +153,7 @@ class BRATSApp(BaseApplication):
                 data_dict = switch_sampler(for_training=True)
 
             image = tf.cast(data_dict['image'], tf.float32)
+            current_iter = tf.placeholder(dtype=tf.float32, name='global_step')
             (net_out, modality_scores) = self.net(image, is_training=self.is_training, outputs_collector=outputs_collector)
             with tf.name_scope('Optimiser'):
                 optimiser_class = OptimiserFactory.create(
@@ -186,13 +188,26 @@ class BRATSApp(BaseApplication):
             )
             reg_losses = tf.get_collection(
                 tf.GraphKeys.REGULARIZATION_LOSSES)
+            outputs_collector.add_to_collection(
+                var=current_iter, name='iter',
+                average_over_devices=True, summary_type='scalar',
+                collection=NETWORK_OUTPUT)
+            class_loss_multiplier = tf.exp(-0.01*tf.cast(current_iter, dtype=tf.float32), name='class_loss_multiplier')
             if self.net_param.decay > 0.0 and reg_losses:
                 reg_loss = tf.reduce_mean(
                     [tf.reduce_mean(reg_loss) for reg_loss in reg_losses])
-                loss = data_loss_seg + reg_loss + data_loss_classification
+                loss = data_loss_seg + reg_loss + (data_loss_classification * class_loss_multiplier)
             else:
                 loss = data_loss_seg
-
+            # outputs_collector.add_to_collection(
+            #     var=class_loss_multiplier, name='class_loss_multiplier',
+            #     average_over_devices=True, summary_type='scalar',
+            #     collection=CONSOLE)
+            #
+            # outputs_collector.add_to_collection(
+            #     var=class_loss_multiplier, name='class_loss_multiplier',
+            #     average_over_devices=True, summary_type='scalar',
+            #     collection=TF_SUMMARIES)
             # with tf.name_scope('Optimiser_Classification'):
             #     optimiser_class = OptimiserFactory.create(name="adam")
             #     classification_optimizer = optimiser_class.get_instance(learning_rate=3e-4)
@@ -371,10 +386,10 @@ class BRATSApp(BaseApplication):
             # classification probabilities or argmax classification labels
             data_dict = switch_sampler(for_training=False)
             image = tf.cast(data_dict['image'], tf.float32)
-            net_out = self.net(image, is_training=self.is_training)
+            (net_out, modality_scores) = self.net(image, is_training=self.is_training)
 
             output_prob = self.segmentation_param.output_prob
-            num_classes = self.segmentation_param.num_classes
+            num_classes = self.segmentation_param.num_classes_seg
             if output_prob and num_classes > 1:
                 post_process_layer = PostProcessingLayer(
                     'SOFTMAX', num_classes=num_classes)
@@ -404,3 +419,28 @@ class BRATSApp(BaseApplication):
             return self.output_decoder.decode_batch(
                 batch_output['window'], batch_output['location'])
         return True
+
+    def set_iteration_update(self, iteration_message):
+        """
+        At each iteration ``application_driver`` calls:
+            ``output = tf.session.run(variables_to_eval, feed_dict=data_dict)``
+
+        to evaluate TF graph elements, where
+        ``variables_to_eval`` and ``data_dict`` are retrieved from
+        ``application_iteration.IterationMessage.ops_to_run`` and
+        ``application_iteration.IterationMessage.data_feed_dict``.
+        in addition to the variables collected by output_collector;
+        implemented in ``application_driver.run_vars``)
+
+        This function (is called before ``tf.session.run`` by the
+        driver) provides an interface for accessing ``variables_to_eval`` and
+        ``data_dict`` at each iteration.
+
+        Override this function for more complex operations according to
+        ``application_iteration.IterationMessage.current_iter``.
+        """
+        self.current_iter = iteration_message.current_iter
+        if iteration_message.is_training:
+            iteration_message.data_feed_dict[self.is_validation] = False
+        elif iteration_message.is_validation:
+            iteration_message.data_feed_dict[self.is_validation] = True

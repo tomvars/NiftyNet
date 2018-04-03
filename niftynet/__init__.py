@@ -53,6 +53,7 @@ require_module('blinker', descriptor='New dependency', mandatory=True)
 import niftynet.utilities.util_common as util
 import niftynet.utilities.user_parameters_parser as user_parameters_parser
 from niftynet.engine.application_driver import ApplicationDriver
+from niftynet.contrib.hemis_midl.application_driver_iteration import ApplicationDriverStep
 from niftynet.evaluation.evaluation_application_driver import \
     EvaluationApplicationDriver
 from niftynet.io.misc_io import touch_folder
@@ -131,8 +132,8 @@ def main():
         pass
 
     # start application
-    driver_table = {'train': ApplicationDriver,
-                    'inference': ApplicationDriver,
+    driver_table = {'train': ApplicationDriverStep,
+                    'inference': ApplicationDriverStep,
                     'evaluation': EvaluationApplicationDriver}
     app_driver = driver_table[system_param['SYSTEM'].action]()
     app_driver.initialise_application(system_param, input_data_param)
