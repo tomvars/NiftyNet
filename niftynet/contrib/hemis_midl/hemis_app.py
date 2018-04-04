@@ -106,12 +106,11 @@ class BRATSApp(BaseApplication):
                 queue_length=self.net_param.queue_length) for reader in
                 self.readers]]
         else:
-            self.sampler = [[GridSampler(
+            self.sampler = [[HeMISSampler(
                 reader=reader,
                 data_param=self.data_param,
                 batch_size=self.net_param.batch_size,
-                spatial_window_size=self.action_param.spatial_window_size,
-                window_border=self.action_param.border,
+                windows_per_image=self.action_param.sample_per_volume,
                 queue_length=self.net_param.queue_length) for reader in
                 self.readers]]
 
@@ -192,7 +191,8 @@ class BRATSApp(BaseApplication):
                 var=current_iter, name='iter',
                 average_over_devices=True, summary_type='scalar',
                 collection=NETWORK_OUTPUT)
-            class_loss_multiplier = tf.exp(-0.01*tf.cast(current_iter, dtype=tf.float32), name='class_loss_multiplier')
+            decay_constant = self.segmentation_param.decay_constant
+            class_loss_multiplier = tf.exp(-decay_constant*tf.cast(current_iter, dtype=tf.float32), name='class_loss_multiplier')
             if self.net_param.decay > 0.0 and reg_losses:
                 reg_loss = tf.reduce_mean(
                     [tf.reduce_mean(reg_loss) for reg_loss in reg_losses])

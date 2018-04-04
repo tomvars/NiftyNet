@@ -76,13 +76,16 @@ class HeMISSampler(Layer, InputBatchQueueRunner):
             if not data:
                 break
             ##### RANDOM ORDER (add random dropping in the future) #####
-            random_order = np.random.permutation(data['image'].shape[-1])
-
+            # random_order = np.random.permutation(data['image'].shape[-1])
+            random_order = range(data['image'].shape[-1])
             data['image'] = data['image'][:, :, :, :, random_order]
             if data['modalities'].shape[2] == 9:
                 data['modalities'] = data['modalities'][:, :, random_order, :, :]
             else:
                 print(image_id, data['modalities'].shape)
+                print(data['modalities'])
+                print(data['label'].shape)
+                print(data['image'].shape)
                 continue
             ############################################################
             image_shapes = \

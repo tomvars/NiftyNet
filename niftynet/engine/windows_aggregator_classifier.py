@@ -58,9 +58,9 @@ class ClassifierSamplesAggregator(ImageWindowsAggregator):
             return
         window_shape = [1, 1, 1, 1, image_out.shape[-1]]
         image_out = np.reshape(image_out, window_shape)
-        for layer in reversed(self.reader.preprocessors):
-            if isinstance(layer, DiscreteLabelNormalisationLayer):
-                image_out, _ = layer.inverse_op(image_out)
+        # for layer in reversed(self.reader.preprocessors):
+        #     if isinstance(layer, DiscreteLabelNormalisationLayer):
+        #         image_out, _ = layer.inverse_op(image_out)
         subject_name = self.reader.get_subject_id(self.image_id)
         filename = "{}{}.nii.gz".format(subject_name, self.prefix)
         source_image_obj = self.input_image[self.name]

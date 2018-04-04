@@ -251,6 +251,13 @@ def __add_multitask_args(parser):
         default=-1)
 
     parser.add_argument(
+        "--decay_constant",
+        metavar='',
+        help="Set decay_constant which is a training hyperparameter which dictates the weighting of L_class vs L_seg",
+        type=float,
+        default=0.01)
+
+    parser.add_argument(
         "--output_prob",
         metavar='',
         help="[Inference only] whether to output multi-class probabilities",
