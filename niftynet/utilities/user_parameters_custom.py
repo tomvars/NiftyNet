@@ -190,6 +190,14 @@ def __add_classification_args(parser):
         type=str2boolean,
         default=False)
 
+    parser.add_argument(
+        "--with_bn",
+        metavar='',
+        help="whether to map unique labels in the training set to "
+             "consecutive integers (the smallest label will be  mapped to 0)",
+        type=str2boolean,
+        default=True)
+
 
     from niftynet.application.classification_application import SUPPORTED_INPUT
     parser = add_input_name_args(parser, SUPPORTED_INPUT)

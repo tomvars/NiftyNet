@@ -15,6 +15,7 @@ from niftynet.layer.deconvolution import DeconvLayer
 from niftynet.layer.elementwise import ElementwiseLayer
 from niftynet.network.base_net import BaseNet
 from niftynet.utilities.util_common import look_up_operations
+from niftynet.layer.activation import ActiLayer
 
 ResNetDesc = namedtuple('ResNetDesc', ['bn', 'fc', 'conv1', 'blocks'])
 class ResNet(BaseNet):
@@ -26,7 +27,7 @@ class ResNet(BaseNet):
     def __init__(self,
                  num_classes,
                  n_features = [16, 64, 128, 256],
-                 n_blocks_per_resolution = 10,
+                 n_blocks_per_resolution = 9,
                  w_initializer=None,
                  w_regularizer=None,
                  b_initializer=None,
@@ -72,6 +73,8 @@ class ResNet(BaseNet):
         tf.logging.info('{} shape: {}'.format(out.name, out.shape))
         out =  layers.fc(out)
         tf.logging.info('{} shape: {}'.format(out.name, out.shape))
+        out = ActiLayer('softmax')(out)
+        tf.logging.info('Added softmax!')
         return out
         
 

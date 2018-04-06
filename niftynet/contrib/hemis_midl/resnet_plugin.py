@@ -32,6 +32,7 @@ class ResNet(BaseNet):
                  w_regularizer=None,
                  b_initializer=None,
                  b_regularizer=None,
+                 with_bn=True,
                  acti_func='relu',
                  name='ResNet'):
 
@@ -46,6 +47,7 @@ class ResNet(BaseNet):
 
         self.n_features = n_features
         self.n_blocks_per_resolution = n_blocks_per_resolution
+        self.with_bn = with_bn
         self.Conv = functools.partial(ConvolutionalLayer,
                                       w_initializer=w_initializer,
                                       w_regularizer=w_regularizer,
@@ -56,12 +58,12 @@ class ResNet(BaseNet):
 
     def create(self):
         bn=BNLayer()
-        fc=FullyConnectedLayer(self.num_classes)
-        conv1=self.Conv(self.n_features[0], acti_func=None, with_bn=False)
+        fc=FullyConnectedLayer(self.num_classes, with_bn=self.with_bn)
+        conv1=self.Conv(self.n_features[0], acti_func=None, with_bn=self.with_bn)
         blocks=[]
-        blocks+=[DownResBlock(self.n_features[1], self.n_blocks_per_resolution, 1, self.Conv)]
+        blocks+=[DownResBlock(self.n_features[1], self.n_blocks_per_resolution, 1, self.Conv, with_bn=self.with_bn)]
         for n in self.n_features[2:]:
-            blocks+=[DownResBlock(n, self.n_blocks_per_resolution, 2, self.Conv)]
+            blocks+=[DownResBlock(n, self.n_blocks_per_resolution, 2, self.Conv, with_bn=self.with_bn)]
         return ResNetDesc(bn=bn,fc=fc,conv1=conv1,blocks=blocks)
 
     def layer_op(self, images, is_training):
@@ -81,7 +83,8 @@ class ResNet(BaseNet):
 BottleneckBlockDesc1 = namedtuple('BottleneckBlockDesc1', ['conv'])
 BottleneckBlockDesc2 = namedtuple('BottleneckBlockDesc2', ['common_bn', 'conv', 'conv_shortcut'])
 class BottleneckBlock(TrainableLayer):
-    def __init__(self, n_output_chns, stride, Conv, name='bottleneck'):
+    def __init__(self, n_output_chns, stride, Conv, with_bn, name='bottleneck'):
+        self.with_bn = with_bn
         self.n_output_chns = n_output_chns
         self.stride=stride
         self.bottle_neck_chns = n_output_chns // 4
@@ -98,11 +101,11 @@ class BottleneckBlock(TrainableLayer):
         else:
             b1 = BNLayer()
             b2 = self.Conv(self.bottle_neck_chns,kernel_size=1,
-                           stride=self.stride, acti_func=None, with_bn=False)
+                           stride=self.stride, acti_func=None, with_bn=self.with_bn)
             b3 = self.Conv(self.bottle_neck_chns,kernel_size=3)
             b4 = self.Conv(self.n_output_chns,kernel_size=1)
             b5 = self.Conv(self.n_output_chns,kernel_size=1,
-                           stride=self.stride, acti_func=None,with_bn=False)
+                           stride=self.stride, acti_func=None,with_bn=self.with_bn)
             return BottleneckBlockDesc2(common_bn=b1, conv=[b2, b3, b4], 
                               conv_shortcut=b5)
 
@@ -124,7 +127,8 @@ class BottleneckBlock(TrainableLayer):
 
 DownResBlockDesc = namedtuple('DownResBlockDesc', ['blocks'])
 class DownResBlock(TrainableLayer):
-    def __init__(self, n_output_chns, count, stride, Conv, name='downres'):
+    def __init__(self, n_output_chns, count, stride, Conv, with_bn, name='downres'):
+        self.with_bn = with_bn
         self.count = count
         self.stride = stride
         self.n_output_chns = n_output_chns
@@ -133,9 +137,9 @@ class DownResBlock(TrainableLayer):
         
     def create(self):
         blocks=[]
-        blocks+=[BottleneckBlock(self.n_output_chns, self.stride, self.Conv)]
+        blocks+=[BottleneckBlock(self.n_output_chns, self.stride, self.Conv, with_bn=self.with_bn)]
         for it in range(1,self.count):
-            blocks+=[BottleneckBlock(self.n_output_chns, 1, self.Conv)]
+            blocks+=[BottleneckBlock(self.n_output_chns, 1, self.Conv, with_bn=self.with_bn)]
         return DownResBlockDesc(blocks=blocks)
         
     def layer_op(self, images, is_training):

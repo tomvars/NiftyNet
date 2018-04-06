@@ -93,9 +93,10 @@ class HeMIS(BaseNet):
         tf.logging.info('Input tensor dims: %s' % input_tensor.shape)
         modality_scores = []
         with tf.variable_scope('modality_classifier') as scope:
-            modality_classifier = ToyNet(n_modalities,
+            modality_classifier = ResNet(n_modalities,
                                          w_regularizer=self.regularizers['w'],
-                                         b_regularizer=self.regularizers['b'])
+                                         b_regularizer=self.regularizers['b'],
+                                         with_bn=False)
             for i in range(n_ims_per_subj):
                 #### Do this conditionally? #####
                 # modality_classifier = ResNet(n_modalities)

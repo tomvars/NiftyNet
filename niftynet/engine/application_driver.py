@@ -253,6 +253,7 @@ class ApplicationDriver(object):
 
             # start samplers' threads
             self._run_sampler_threads(session=session)
+            time.sleep(10)
             self.graph = self._create_graph(self.graph)
 
             # check app variables initialised and ready for starts
@@ -531,6 +532,7 @@ class ApplicationDriver(object):
         config = tf.ConfigProto()
         config.log_device_placement = False
         config.allow_soft_placement = True
+        config.gpu_options.allow_growth = True
         return config
 
 

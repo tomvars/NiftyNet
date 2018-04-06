@@ -183,8 +183,14 @@ class ImageReader(Layer):
         except (IndexError, TypeError):
             return -1, None, None
 
-        image_data_dict = \
-            {field: image.get_data() for (field, image) in image_dict.items()}
+        image_data_dict = {}
+        for (field, image) in image_dict.items():
+            # try:
+            image_data_dict[field] = image.get_data()
+            # except IndexError as e:
+            #     print(e)
+            #     print(image.file_path)
+            #     return -1, None, None
         interp_order_dict = \
             {field: image.interp_order for (field, image) in image_dict.items()}
 

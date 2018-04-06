@@ -71,8 +71,8 @@ class ApplicationDriverStep(ApplicationDriver):
 
             iter_msg.ops_to_run[NETWORK_OUTPUT] = \
                 self.outputs_collector.variables(NETWORK_OUTPUT)
-            if self.is_training:
-                iter_msg.data_feed_dict[iter_msg.ops_to_run['niftynetout']['iter']] = [[iter_msg.current_iter]]
+            # if self.is_training:
+            #     iter_msg.data_feed_dict[iter_msg.ops_to_run['niftynetout']['iter']] = [[iter_msg.current_iter]]
             graph_output = sess.run(iter_msg.ops_to_run,
                                     feed_dict=iter_msg.data_feed_dict)
             iter_msg.current_iter_output = graph_output

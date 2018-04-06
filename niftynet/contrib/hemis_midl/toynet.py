@@ -48,6 +48,7 @@ class ToyNet(BaseNet):
         flow = conv_1(images)
         flow = ActiLayer('relu')(flow)
         flow = conv_2(flow)
+        flow = ActiLayer('relu')(flow)
         flow = FCLayer(self.num_classes)(flow)
         flow = ActiLayer('softmax')(flow)
         return flow

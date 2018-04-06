@@ -1,189 +1,163 @@
 # -*- coding: utf-8 -*-
 """
-Generating uniformly distributed image window from input image
-This can also be considered as a "random cropping" layer of the
-input image.
+Resize input image as output window.
 """
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import, print_function, division
 
 import numpy as np
+import scipy.ndimage
 import tensorflow as tf
 
 from niftynet.engine.image_window import ImageWindow, N_SPATIAL
 from niftynet.engine.image_window_buffer import InputBatchQueueRunner
 from niftynet.layer.base_layer import Layer
 
-# pylint: disable=too-many-arguments
 
 class HeMISSampler(Layer, InputBatchQueueRunner):
     """
-    This class generates samples by uniformly sampling each input volume
-    currently the coordinates are randomised for spatial dims only,
-    i.e., the first three dims of image.
-
-    This layer can be considered as a "random cropping" layer of the
-    input image.
+    This class generates samples by rescaling
+    the whole image to the desired size
+    currently 5D input is supported:
+    ``Height x Width x Depth x time x Modality``
     """
 
     def __init__(self,
                  reader,
                  data_param,
                  batch_size,
-                 windows_per_image,
+                 number_of_modalities=4,
+                 spatial_window_size=(),
+                 windows_per_image=1,
+                 shuffle_buffer=True,
                  queue_length=10):
+
         self.reader = reader
+        self.windows_per_image = windows_per_image
+        self.shuffle = bool(shuffle_buffer)
+        self.number_of_modalities = number_of_modalities
+
         Layer.__init__(self, name='input_buffer')
         InputBatchQueueRunner.__init__(
             self,
             capacity=queue_length,
-            shuffle=True)
+            shuffle=self.shuffle)
         tf.logging.info('reading size of preprocessed images')
         self.window = ImageWindow.from_data_reader_properties(
             self.reader.input_sources,
             self.reader.shapes,
             self.reader.tf_dtypes,
             data_param)
-
+        if spatial_window_size:
+            # override all spatial window defined in input
+            # modalities sections
+            # this is useful when do inference with a spatial window
+            # which is different from the training specifications
+            self.window.set_spatial_shape(spatial_window_size)
         tf.logging.info('initialised window instance')
         self._create_queue_and_ops(self.window,
-                                   enqueue_size=windows_per_image,
+                                   enqueue_size=1,
                                    dequeue_size=batch_size)
         tf.logging.info("initialised sampler output %s ", self.window.shapes)
 
-        self.spatial_coordinates_generator = rand_spatial_coordinates
-
-    # pylint: disable=too-many-locals
-    def layer_op(self):
+    def layer_op(self, *args, **kwargs):
         """
         This function generates sampling windows to the input buffer
-        image data are from ``self.reader()``
+        image data are from ``self.reader()``.
 
         It first completes window shapes based on image data,
-        then finds random coordinates based on the window shapes
-        finally extract window with the coordinates and output
-        a dictionary (required by input buffer).
+        then resize each image as window and output
+        a dictionary (required by input buffer)
 
         :return: output data dictionary ``{placeholders: data_array}``
         """
         while True:
-            image_id, data, _ = self.reader(idx=None, shuffle=True)
+            try:
+                image_id, data, interp_orders = self.reader(shuffle=self.shuffle)
+            except Exception as e:
+                print('Skipping image_id: {}, because of {}'.format(image_id, e))
+            if not data:
+                break
             ##### Randomly drop modalities according to params #####
-            modalities_to_drop = int(np.random.choice([0, 1, 2, 3], 1, p=[0.5, 0.3, 0.15, 0.05]))
+            p_dict = {4: [0.5, 0.3, 0.15, 0.05], 3: [0.5, 0.3, 0.2], 2: [0.5, 0.5]}
+            modalities_to_drop = int(np.random.choice(list(range(self.number_of_modalities)),
+                                                      1, p_dict[self.number_of_modalities]))
             data_shape_without_modality = list(data['image'].shape)[:-1]
-            random_indices = np.random.permutation([0, 1, 2, 3])
+            random_indices = np.random.permutation(list(range(self.number_of_modalities)))
             for idx in range(modalities_to_drop):
                 idx_to_drop = random_indices[idx]
                 data['image'][:, :, :, :, idx_to_drop] = np.zeros(shape=data_shape_without_modality)
-            ########################################################
-            if not data:
-                break
-            image_shapes = dict((name, data[name].shape)
-                                for name in self.window.names)
+                ########################################################
+            image_shapes = \
+                dict((name, data[name].shape) for name in self.window.names)
+            # window shapes can be dynamic, here they
+            # are converted to static ones
+            # as now we know the image shapes
             static_window_shapes = self.window.match_image_shapes(image_shapes)
 
-            # find random coordinates based on window and image shapes
-            coordinates = self.spatial_coordinates_generator(
-                image_id,
-                data,
-                image_shapes,
-                static_window_shapes,
-                self.window.n_samples)
+            # for resize sampler the coordinates are not used
+            # simply use the spatial dims of the input image
+            all_coordinates = dummy_coordinates(image_id,
+                                                static_window_shapes)
+            for _ in range(self.windows_per_image):
+                output_dict = {}
+                for name in list(data):
+                    # prepare output dictionary keys
+                    coordinates_key = self.window.coordinates_placeholder(name)
+                    image_data_key = self.window.image_data_placeholder(name)
 
-            # initialise output dict, placeholders as dictionary keys
-            # this dictionary will be used in
-            # enqueue operation in the form of: `feed_dict=output_dict`
-            output_dict = {}
-            # fill output dict with data
-            for name in list(data):
-                coordinates_key = self.window.coordinates_placeholder(name)
-                image_data_key = self.window.image_data_placeholder(name)
+                    # prepare coordinates data
+                    output_dict[coordinates_key] = all_coordinates[name]
 
-                # fill the coordinates
-                location_array = coordinates[name]
-                output_dict[coordinates_key] = location_array
+                    # prepare image data
+                    image_shape = image_shapes[name]
+                    window_shape = static_window_shapes[name]
 
-                # fill output window array
-                image_array = []
-                for window_id in range(self.window.n_samples):
-                    x_start, y_start, z_start, x_end, y_end, z_end = \
-                        location_array[window_id, 1:]
-                    try:
-                        image_window = data[name][
-                            x_start:x_end, y_start:y_end, z_start:z_end, ...]
-                        image_array.append(image_window[np.newaxis, ...])
-                    except ValueError:
-                        tf.logging.fatal(
-                            "dimensionality miss match in input volumes, "
-                            "please specify spatial_window_size with a "
-                            "3D tuple and make sure each element is "
-                            "smaller than the image length in each dim.")
-                        raise
-                if len(image_array) > 1:
-                    output_dict[image_data_key] = \
-                        np.concatenate(image_array, axis=0)
-                else:
-                    output_dict[image_data_key] = image_array[0]
-            # the output image shape should be
-            # [enqueue_batch_size, x, y, z, time, modality]
-            # where enqueue_batch_size = windows_per_image
-            yield output_dict
+                    if (image_shape == window_shape or
+                            interp_orders[name][0] < 0):
+                        # already in the same shape
+                        image_window = data[name]
+                    else:
+                        zoom_ratio = \
+                            [float(p) / float(d) for p, d in
+                             zip(window_shape, image_shape)]
+                        image_window = zoom_3d(
+                            image=data[name],
+                            ratio=zoom_ratio,
+                            interp_order=interp_orders[name][0])
+                    output_dict[image_data_key] = image_window[np.newaxis, ...]
+                # the output image shape should be
+                # [enqueue_batch_size, x, y, z, time, modality]
+                # here enqueue_batch_size = 1 as we only have one sample
+                # per image
+                yield output_dict
 
-def rand_spatial_coordinates(subject_id,
-                             data,
-                             img_sizes,
-                             win_sizes,
-                             n_samples=1):
+
+def zoom_3d(image, ratio, interp_order):
     """
-    ``win_sizes`` could be different (for example in segmentation network
-    input image window size is ``32x32x10``,
-    training label window is ``16x16x10`` -- the network reduces x-y plane
-    spatial resolution.)
-
-    This function handles this situation by first find the largest
-    window across these window definitions, and generate the coordinates.
-    These coordinates are then adjusted for each of the
-    smaller window sizes (the output windows are concentric).
+    Taking 5D image as input, and zoom each 3D slice independently
     """
-    assert data is not None, "No input from image reader. Please check" \
-                             "the configuration file."
-    n_samples = max(n_samples, 1)
-    uniq_spatial_size = set([img_size[:N_SPATIAL]
-                             for img_size in list(img_sizes.values())])
-    if len(uniq_spatial_size) > 1:
-        tf.logging.fatal("Don't know how to generate sampling "
-                         "locations: Spatial dimensions of the "
-                         "grouped input sources are not "
-                         "consistent. %s", uniq_spatial_size)
-        raise NotImplementedError
-    uniq_spatial_size = uniq_spatial_size.pop()
+    assert image.ndim == 5, "input images should be 5D array"
+    output = []
+    for time_pt in range(image.shape[3]):
+        output_mod = []
+        for mod in range(image.shape[4]):
+            zoomed = scipy.ndimage.zoom(
+                image[..., time_pt, mod], ratio[:3], order=interp_order)
+            output_mod.append(zoomed[..., np.newaxis, np.newaxis])
+        output.append(np.concatenate(output_mod, axis=-1))
+    return np.concatenate(output, axis=-2)
 
-    # find spatial window location based on the largest spatial window
-    spatial_win_sizes = [win_size[:N_SPATIAL]
-                         for win_size in win_sizes.values()]
-    spatial_win_sizes = np.asarray(spatial_win_sizes, dtype=np.int32)
-    max_spatial_win = np.max(spatial_win_sizes, axis=0)
-    max_coords = np.zeros((n_samples, N_SPATIAL), dtype=np.int32)
-    for i in range(0, N_SPATIAL):
-        assert uniq_spatial_size[i] >= max_spatial_win[i], \
-            "window size {} is larger than image size {}".format(
-                max_spatial_win[i], uniq_spatial_size[i])
-        max_coords[:, i] = np.random.randint(
-            0, max(uniq_spatial_size[i] - max_spatial_win[i], 1), n_samples)
 
-    # adjust max spatial coordinates based on each spatial window size
+def dummy_coordinates(image_id, image_sizes):
+    """
+    This function returns a set of image window coordinates
+    which are just from 0 to image_shapes.
+    """
     all_coordinates = {}
-    for mod in list(win_sizes):
-        win_size = win_sizes[mod][:N_SPATIAL]
-        half_win_diff = np.floor((max_spatial_win - win_size) / 2.0)
-        # shift starting coords of the window
-        # so that smaller windows are centred within the large windows
-        spatial_coords = np.zeros((n_samples, N_SPATIAL * 2), dtype=np.int32)
-        spatial_coords[:, :N_SPATIAL] = \
-            max_coords[:, :N_SPATIAL] + half_win_diff[:N_SPATIAL]
-        spatial_coords[:, N_SPATIAL:] = \
-            spatial_coords[:, :N_SPATIAL] + win_size[:N_SPATIAL]
-        # include the subject id
-        subject_id = np.ones((n_samples,), dtype=np.int32) * subject_id
-        spatial_coords = np.append(subject_id[:, None], spatial_coords, axis=1)
-        all_coordinates[mod] = spatial_coords
+    for mod in list(image_sizes):
+        starting_coordinates = [0, 0, 0]
+        image_spatial_shape = list(image_sizes[mod][:N_SPATIAL])
+        coords = [[image_id] + starting_coordinates + image_spatial_shape]
+        all_coordinates[mod] = np.asarray(coords)
     return all_coordinates
+

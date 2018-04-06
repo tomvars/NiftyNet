@@ -25,6 +25,8 @@ class HeMISSampler(Layer, InputBatchQueueRunner):
                  reader,
                  data_param,
                  batch_size,
+                 randomly_permute=True,
+                 randomly_drop=True,
                  spatial_window_size=(),
                  windows_per_image=1,
                  shuffle_buffer=True,
@@ -33,6 +35,8 @@ class HeMISSampler(Layer, InputBatchQueueRunner):
         self.reader = reader
         self.windows_per_image = windows_per_image
         self.shuffle = bool(shuffle_buffer)
+        self.randomly_permute = randomly_permute
+        self.randomly_drop = randomly_drop
 
         Layer.__init__(self, name='input_buffer')
         InputBatchQueueRunner.__init__(
@@ -75,12 +79,29 @@ class HeMISSampler(Layer, InputBatchQueueRunner):
                 print('Skipping image_id: {}, because of {}'.format(image_id, e))
             if not data:
                 break
+            ##### Randomly drop modalities according to params #####
+            p_dict = {4: [0.5, 0.3, 0.15, 0.05], 3: [0.5, 0.3, 0.2], 2: [0.5, 0.5]}
+            data_shape_without_modality = list(data['image'].shape)[:-1]
+            number_of_modalities = sum([1 if np.count_nonzero(data['image'][..., i]) > 0 else 0 for i in range(data['image'].shape[-1])])
+            if number_of_modalities == 1:
+                print(data['image'])
+                continue
+            modalities_to_drop = int(np.random.choice(list(range(number_of_modalities)),
+                                                      1, p_dict[number_of_modalities]))
+            random_indices = np.random.permutation(list(range(number_of_modalities)))
+            for idx in range(modalities_to_drop):
+                idx_to_drop = random_indices[idx]
+                data['image'][:, :, :, :, idx_to_drop] = np.zeros(shape=data_shape_without_modality)
+            ########################################################
             ##### RANDOM ORDER (add random dropping in the future) #####
-            # random_order = np.random.permutation(data['image'].shape[-1])
-            random_order = range(data['image'].shape[-1])
+            input_size = data['image'].shape[-1]
+            random_order = np.random.permutation(input_size) if self.randomly_permute else range(input_size)
             data['image'] = data['image'][:, :, :, :, random_order]
-            if data['modalities'].shape[2] == 9:
+
+            if data['modalities'].shape[2] == input_size:
                 data['modalities'] = data['modalities'][:, :, random_order, :, :]
+            elif data['modalities'].shape[0] == input_size:
+                data['modalities'] = data['modalities'][random_order, :, :, :, :]
             else:
                 print(image_id, data['modalities'].shape)
                 print(data['modalities'])
@@ -88,6 +109,7 @@ class HeMISSampler(Layer, InputBatchQueueRunner):
                 print(data['image'].shape)
                 continue
             ############################################################
+
             image_shapes = \
                 dict((name, data[name].shape) for name in self.window.names)
             # window shapes can be dynamic, here they

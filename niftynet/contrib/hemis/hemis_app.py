@@ -9,7 +9,7 @@ from niftynet.engine.application_factory import \
 from niftynet.engine.application_variables import \
     CONSOLE, NETWORK_OUTPUT, TF_SUMMARIES
 from niftynet.engine.sampler_grid import GridSampler
-from niftynet.contrib.midl.midl_sampler import MIDLSampler as HeMISSampler
+from niftynet.contrib.hemis.hemis_sampler import HeMISSampler
 from niftynet.engine.windows_aggregator_grid import GridSamplesAggregator
 from niftynet.io.image_reader import ImageReader
 from niftynet.layer.binary_masking import BinaryMaskingLayer

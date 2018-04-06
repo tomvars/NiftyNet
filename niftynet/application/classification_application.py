@@ -209,7 +209,8 @@ class ClassificationApplication(BaseApplication):
                 name=self.net_param.bias_initializer),
             w_regularizer=w_regularizer,
             b_regularizer=b_regularizer,
-            acti_func=self.net_param.activation_function)
+            acti_func=self.net_param.activation_function
+        )
 
     def add_confusion_matrix_summaries_(self,
                                         outputs_collector,
@@ -252,6 +253,11 @@ class ClassificationApplication(BaseApplication):
             var=tf.trace(conf_mat), name='accuracy',
             average_over_devices=True, summary_type='scalar',
             collection=TF_SUMMARIES)
+
+        outputs_collector.add_to_collection(
+            var=tf.trace(conf_mat), name='accuracy',
+            average_over_devices=True, summary_type='scalar',
+            collection=CONSOLE)
 
 
     def connect_data_and_network(self,
@@ -315,24 +321,23 @@ class ClassificationApplication(BaseApplication):
             net_out = self.net(image, is_training=self.is_training)
             output_prob = self.classification_param.output_prob
             num_classes = self.classification_param.num_classes
-            if output_prob and num_classes > 1:
-                print('OPTION A')
-                post_process_layer = PostProcessingLayer(
-                    'SOFTMAX', num_classes=num_classes)
-            elif not output_prob and num_classes > 1:
-                print('OPTION B')
-                post_process_layer = PostProcessingLayer(
-                    'ARGMAX', num_classes=num_classes)
-            else:
-                print('OPTION C')
-                post_process_layer = PostProcessingLayer(
-                    'IDENTITY', num_classes=num_classes)
-            net_out = post_process_layer(net_out)
+            # if output_prob and num_classes > 1:
+            #     print('OPTION A')
+            #     post_process_layer = PostProcessingLayer(
+            #         'SOFTMAX', num_classes=num_classes)
+            # elif not output_prob and num_classes > 1:
+            #     print('OPTION B')
+            #     post_process_layer = PostProcessingLayer(
+            #         'ARGMAX', num_classes=num_classes)
+            # else:
+            #     print('OPTION C')
+            #     post_process_layer = PostProcessingLayer(
+            #         'IDENTITY', num_classes=num_classes)
+            # net_out = post_process_layer(net_out)
+
+            net_out = tf.cast(1000 * net_out, tf.int32)
             print('net_out.shape may need to be resized:', net_out.shape)
             # exit()
-            outputs_collector.add_to_collection(
-                var=net_out, name='net_out',
-                average_over_devices=True, collection=CONSOLE)
             outputs_collector.add_to_collection(
                 var=net_out, name='window',
                 average_over_devices=False, collection=NETWORK_OUTPUT)
