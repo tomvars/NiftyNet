@@ -43,8 +43,14 @@ class GridSamplesAggregator(ImageWindowsAggregator):
 
     def decode_batch(self, window, location):
         n_samples = location.shape[0]
+        np.save('/home/tom/phd/debug_window1.npy', window)
+        np.save('/home/tom/phd/debug_location1.npy', location)
         window, location = self.crop_batch(window, location, self.window_border)
-
+        np.save('/home/tom/phd/debug_window2.npy', window)
+        np.save('/home/tom/phd/debug_location2.npy', location)
+        print(location[0][0])
+        print(self.reader.get_subject_id(location[0][0]))
+        exit()
         for batch_id in range(n_samples):
             image_id, x_start, y_start, z_start, x_end, y_end, z_end = \
                 location[batch_id, :]
@@ -69,9 +75,9 @@ class GridSamplesAggregator(ImageWindowsAggregator):
         output_image_shape = spatial_shape + (n_channels,)
         empty_image = np.zeros(output_image_shape, dtype=dtype)
 
-        for layer in self.reader.preprocessors:
-            if isinstance(layer, PadLayer):
-                empty_image, _ = layer(empty_image)
+        # for layer in self.reader.preprocessors:
+        #     if isinstance(layer, PadLayer):
+        #         empty_image, _ = layer(empty_image)
         return empty_image
 
     def _save_current_image(self):

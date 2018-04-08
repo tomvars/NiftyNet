@@ -56,6 +56,7 @@ class ClassifierSamplesAggregator(ImageWindowsAggregator):
     def _save_current_image(self, image_out):
         if self.input_image is None:
             return
+        print('image_out shape', image_out.shape)
         window_shape = [1, 1, 1, 1, image_out.shape[-1]]
         image_out = np.reshape(image_out, window_shape)
         # for layer in reversed(self.reader.preprocessors):

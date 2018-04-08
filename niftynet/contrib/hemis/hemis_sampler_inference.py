@@ -72,23 +72,14 @@ class HeMISSampler(Layer, InputBatchQueueRunner):
         """
         while True:
             try:
-                image_id, data, interp_orders = self.reader(shuffle=self.shuffle)
+                image_id, data, interp_orders = self.reader(shuffle=False)
             except Exception as e:
                 print('Skipping image_id: {}, because of {}'.format(image_id, e))
             if not data:
                 break
-            ##### Randomly drop modalities according to params #####
-            print('subject_id', self.reader.get_subject_id(image_id))
-            p_dict = {4: [0.5, 0.3, 0.15, 0.05], 3: [0.5, 0.3, 0.2], 2: [0.5, 0.5]}
-            modalities_to_drop = int(np.random.choice(list(range(self.number_of_modalities)),
-                                                      1, p_dict[self.number_of_modalities]))
-            modalities_to_drop = 0
-            data_shape_without_modality = list(data['image'].shape)[:-1]
-            random_indices = np.random.permutation(list(range(self.number_of_modalities)))
-            for idx in range(modalities_to_drop):
-                idx_to_drop = random_indices[idx]
-                data['image'][:, :, :, :, idx_to_drop] = np.zeros(shape=data_shape_without_modality)
-                ########################################################
+            np.save('/home/tom/phd/debug_input_tensor.npy', data['image'])
+            print(data.keys())
+            np.save('/home/tom/phd/debug_input_tensor.npy', data['label'])
             image_shapes = \
                 dict((name, data[name].shape) for name in self.window.names)
             # window shapes can be dynamic, here they
@@ -109,6 +100,7 @@ class HeMISSampler(Layer, InputBatchQueueRunner):
 
                     # prepare coordinates data
                     output_dict[coordinates_key] = all_coordinates[name]
+
                     # prepare image data
                     image_shape = image_shapes[name]
                     window_shape = static_window_shapes[name]
@@ -130,7 +122,6 @@ class HeMISSampler(Layer, InputBatchQueueRunner):
                 # [enqueue_batch_size, x, y, z, time, modality]
                 # here enqueue_batch_size = 1 as we only have one sample
                 # per image
-
                 yield output_dict
 
 

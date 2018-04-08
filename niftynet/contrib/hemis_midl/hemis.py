@@ -110,7 +110,7 @@ class HeMIS(BaseNet):
                 # out = tf.cond(cond,
                 #               false_fn=lambda: tf.constant(null_output),
                 #               true_fn=lambda: modality_classifier(tf.expand_dims(input_tensor[:, :, :, i], -1), is_training))
-                out = modality_classifier(tf.expand_dims(input_tensor[:, :, :, i], -1), is_training)
+                out = modality_classifier(tf.expand_dims(input_tensor[:, :, :, i], -1), True)
                 # out = tf.constant(null_output)
 
                 modality_scores.append(out)

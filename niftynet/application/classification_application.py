@@ -321,21 +321,19 @@ class ClassificationApplication(BaseApplication):
             net_out = self.net(image, is_training=self.is_training)
             output_prob = self.classification_param.output_prob
             num_classes = self.classification_param.num_classes
-            # if output_prob and num_classes > 1:
-            #     print('OPTION A')
-            #     post_process_layer = PostProcessingLayer(
-            #         'SOFTMAX', num_classes=num_classes)
-            # elif not output_prob and num_classes > 1:
-            #     print('OPTION B')
-            #     post_process_layer = PostProcessingLayer(
-            #         'ARGMAX', num_classes=num_classes)
-            # else:
-            #     print('OPTION C')
-            #     post_process_layer = PostProcessingLayer(
-            #         'IDENTITY', num_classes=num_classes)
-            # net_out = post_process_layer(net_out)
-
-            net_out = tf.cast(1000 * net_out, tf.int32)
+            if output_prob and num_classes > 1:
+                print('OPTION A')
+                post_process_layer = PostProcessingLayer(
+                    'SOFTMAX', num_classes=num_classes)
+            elif not output_prob and num_classes > 1:
+                print('OPTION B')
+                post_process_layer = PostProcessingLayer(
+                    'ARGMAX', num_classes=num_classes)
+            else:
+                print('OPTION C')
+                post_process_layer = PostProcessingLayer(
+                    'IDENTITY', num_classes=num_classes)
+            net_out = post_process_layer(net_out)
             print('net_out.shape may need to be resized:', net_out.shape)
             # exit()
             outputs_collector.add_to_collection(

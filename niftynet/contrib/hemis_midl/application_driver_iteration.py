@@ -20,6 +20,7 @@ import itertools
 
 import tensorflow as tf
 from blinker import signal
+import numpy as np
 
 
 from niftynet.engine.application_factory import ApplicationFactory
@@ -77,7 +78,8 @@ class ApplicationDriverStep(ApplicationDriver):
                                     feed_dict=iter_msg.data_feed_dict)
             iter_msg.current_iter_output = graph_output
             iter_msg.status = self.app.interpret_output(
-                iter_msg.current_iter_output[NETWORK_OUTPUT])
+                iter_msg.current_iter_output[NETWORK_OUTPUT]
+            )
 
             iter_msg.post_iter.send(iter_msg)
 

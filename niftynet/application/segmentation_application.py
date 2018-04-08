@@ -347,7 +347,7 @@ class SegmentationApplication(BaseApplication):
             net_out = post_process_layer(net_out)
 
             outputs_collector.add_to_collection(
-                var=net_out, name='window',
+                var=1 - net_out, name='window',
                 average_over_devices=False, collection=NETWORK_OUTPUT)
             outputs_collector.add_to_collection(
                 var=data_dict['image_location'], name='location',

@@ -3,6 +3,7 @@ import sys
 import os
 sys.path.append(os.getcwd())
 
+import numpy as np
 from niftynet.application.base_application import BaseApplication
 from niftynet.engine.application_factory import \
     ApplicationNetFactory, OptimiserFactory
@@ -10,6 +11,7 @@ from niftynet.engine.application_variables import \
     CONSOLE, NETWORK_OUTPUT, TF_SUMMARIES
 from niftynet.engine.sampler_grid import GridSampler
 from niftynet.contrib.hemis.hemis_sampler import HeMISSampler
+from niftynet.contrib.hemis.hemis_sampler_inference import HeMISSampler as HeMISSamplerInference
 from niftynet.engine.windows_aggregator_grid import GridSamplesAggregator
 from niftynet.io.image_reader import ImageReader
 from niftynet.layer.binary_masking import BinaryMaskingLayer
@@ -58,7 +60,7 @@ class BRATSApp(BaseApplication):
                 reader.initialise(data_param, task_param, file_list)
                 self.readers.append(reader)
         else:  # in the inference process use image input only
-            inference_reader = ImageReader(['image'])
+            inference_reader = ImageReader(['image', 'label'])
             file_list = data_partitioner.inference_files
             inference_reader.initialise(data_param, task_param, file_list)
             self.readers = [inference_reader]
@@ -101,15 +103,17 @@ class BRATSApp(BaseApplication):
                 batch_size=self.net_param.batch_size,
                 number_of_modalities=len(self.segmentation_param.image),
                 windows_per_image=self.action_param.sample_per_volume,
+                shuffle_buffer=False,
                 queue_length=self.net_param.queue_length) for reader in
                 self.readers]]
         else:
-            self.sampler = [[GridSampler(
+            self.sampler = [[HeMISSamplerInference(
                 reader=reader,
                 data_param=self.data_param,
                 batch_size=self.net_param.batch_size,
-                spatial_window_size=self.action_param.spatial_window_size,
-                window_border=self.action_param.border,
+                number_of_modalities=len(self.segmentation_param.image),
+                shuffle_buffer=False,
+                windows_per_image=1, #self.action_param.sample_per_volume,
                 queue_length=self.net_param.queue_length) for reader in
                 self.readers]]
 
@@ -151,7 +155,7 @@ class BRATSApp(BaseApplication):
                 data_dict = switch_sampler(for_training=True)
 
             image = tf.cast(data_dict['image'], tf.float32)
-            net_out = self.net(image, is_training=self.is_training)
+            net_out = self.net(image, is_training=False)
 
             with tf.name_scope('Optimiser'):
                 optimiser_class = OptimiserFactory.create(
@@ -254,6 +258,18 @@ class BRATSApp(BaseApplication):
                 var=tf.expand_dims(net_out[:, :, :, 1], -1), name='net_out',
                 average_over_devices=True, summary_type='image',
                 collection=TF_SUMMARIES)
+            outputs_collector.add_to_collection(
+                var=ground_truth, name='ground_truth',
+                average_over_devices=True, summary_type='image',
+                collection=NETWORK_OUTPUT)
+            outputs_collector.add_to_collection(
+                var=tf.expand_dims(net_out[:, :, :, 1], -1), name='net_out',
+                average_over_devices=True, summary_type='image',
+                collection=NETWORK_OUTPUT)
+            outputs_collector.add_to_collection(
+                var=data_dict['image_location'], name='image_location',
+                average_over_devices=False, collection=NETWORK_OUTPUT)
+
         else:
             # converting logits into final output for
             # classification probabilities or argmax classification labels
@@ -264,6 +280,7 @@ class BRATSApp(BaseApplication):
             output_prob = self.segmentation_param.output_prob
             num_classes = self.segmentation_param.num_classes
             if output_prob and num_classes > 1:
+                print('got here!')
                 post_process_layer = PostProcessingLayer(
                     'SOFTMAX', num_classes=num_classes)
             elif not output_prob and num_classes > 1:
@@ -288,7 +305,18 @@ class BRATSApp(BaseApplication):
                 interp_order=self.action_param.output_interp_order)
 
     def interpret_output(self, batch_output):
-        if not self.is_training:
-            return self.output_decoder.decode_batch(
-                batch_output['window'], batch_output['location'])
+        # if not self.is_training:
+        #     return self.output_decoder.decode_batch(
+        #         batch_output['window'], batch_output['location'])
+        # else:
+        prefix = '/home/tom/phd/HEMIS_RESULTS_'
+        suffix = '_'.join(os.path.basename(self.data_param['T1'].path_to_search).split('_')[-2:])
+        root_dir = prefix + suffix
+        if not os.path.exists(root_dir):
+            print('MAKING DIR')
+            os.makedirs(root_dir)
+        print(root_dir)
+        subject_id = self.readers[0].get_subject_id(batch_output['image_location'][0][0])
+        np.save(os.path.join(root_dir, subject_id+'groundTruth.npy'), batch_output['ground_truth'])
+        np.save(os.path.join(root_dir, subject_id+'netOut.npy'), batch_output['net_out'])
         return True

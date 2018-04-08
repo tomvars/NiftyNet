@@ -62,7 +62,7 @@ class BRATSApp(BaseApplication):
                 reader.initialise(data_param, task_param, file_list)
                 self.readers.append(reader)
         else:  # in the inference process use image input only
-            inference_reader = ImageReader(['image'])
+            inference_reader = ImageReader(['image', 'label'])
             file_list = data_partitioner.inference_files
             inference_reader.initialise(data_param, task_param, file_list)
             self.readers = [inference_reader]
@@ -103,6 +103,7 @@ class BRATSApp(BaseApplication):
                 reader=reader,
                 data_param=self.data_param,
                 batch_size=self.net_param.batch_size,
+                shuffle_buffer=False,
                 windows_per_image=self.action_param.sample_per_volume,
                 queue_length=self.net_param.queue_length) for reader in
                 self.readers]]
@@ -111,6 +112,7 @@ class BRATSApp(BaseApplication):
                 reader=reader,
                 data_param=self.data_param,
                 batch_size=self.net_param.batch_size,
+                shuffle_buffer=False,
                 windows_per_image=int(self.action_param.sample_per_volume),
                 queue_length=self.net_param.queue_length) for reader in
                 self.readers]]
@@ -200,25 +202,7 @@ class BRATSApp(BaseApplication):
                 loss = data_loss_seg + reg_loss + (data_loss_classification * class_loss_multiplier)
             else:
                 loss = data_loss_seg
-            # outputs_collector.add_to_collection(
-            #     var=class_loss_multiplier, name='class_loss_multiplier',
-            #     average_over_devices=True, summary_type='scalar',
-            #     collection=CONSOLE)
-            #
-            # outputs_collector.add_to_collection(
-            #     var=class_loss_multiplier, name='class_loss_multiplier',
-            #     average_over_devices=True, summary_type='scalar',
-            #     collection=TF_SUMMARIES)
-            # with tf.name_scope('Optimiser_Classification'):
-            #     optimiser_class = OptimiserFactory.create(name="adam")
-            #     classification_optimizer = optimiser_class.get_instance(learning_rate=3e-4)
             grads_seg = self.optimiser.compute_gradients(loss)
-            # grads_classification = classification_optimizer.compute_gradients(data_loss_classification)
-            # collecting gradients variables
-            # grads_classification = [x for x in grads_classification if 'modality_classifier' in x[1].name]
-            # grads_seg = [x for x in grads_seg if 'modality_classifier' not in x[1].name]
-            # print('grads_classification', grads_classification)
-            # print('grads_seg', grads_seg)
             gradients_collector.add_to_collection([grads_seg])
             # collecting output variables
             tf.logging.info('net_out %s' % net_out.shape)
@@ -387,7 +371,8 @@ class BRATSApp(BaseApplication):
             # classification probabilities or argmax classification labels
             data_dict = switch_sampler(for_training=False)
             image = tf.cast(data_dict['image'], tf.float32)
-            (net_out, modality_scores) = self.net(image, is_training=self.is_training)
+            ground_truth = data_dict.get('label', None)
+            (net_out, modality_scores) = self.net(image, is_training=False)
 
             output_prob = self.segmentation_param.output_prob
             num_classes = self.segmentation_param.num_classes_seg
@@ -408,6 +393,15 @@ class BRATSApp(BaseApplication):
             outputs_collector.add_to_collection(
                 var=data_dict['image_location'], name='location',
                 average_over_devices=False, collection=NETWORK_OUTPUT)
+            outputs_collector.add_to_collection(
+                var=ground_truth, name='ground_truth',
+                average_over_devices=True, collection=NETWORK_OUTPUT)
+            outputs_collector.add_to_collection(
+                var=net_out, name='net_out',
+                average_over_devices=True, collection=NETWORK_OUTPUT)
+            outputs_collector.add_to_collection(
+                var=data_dict['image_location'], name='image_location',
+                average_over_devices=True, collection=NETWORK_OUTPUT)
 
             self.output_decoder = ResizeSamplesAggregator(
                 image_reader=self.readers[0],
@@ -417,8 +411,20 @@ class BRATSApp(BaseApplication):
 
     def interpret_output(self, batch_output):
         if not self.is_training:
-            return self.output_decoder.decode_batch(
-                batch_output['window'], batch_output['location'])
+            # return self.output_decoder.decode_batch(
+            #     batch_output['window'], batch_output['location'])
+            prefix = '/home/tom/phd/MIDLNET_RESULTS_'
+            suffix = '_'.join(os.path.basename(self.data_param['input0'].path_to_search).split('_')[-2:])
+            root_dir = prefix + suffix
+            if not os.path.exists(root_dir):
+                print('MAKING DIR')
+                os.makedirs(root_dir)
+            print(root_dir)
+            if batch_output['image_location'][0][0] == -1:
+                print('Skipping bad sample!...')
+            subject_id = self.readers[0].get_subject_id(batch_output['image_location'][0][0])
+            np.save(os.path.join(root_dir, subject_id + '_groundTruth.npy'), batch_output['ground_truth'])
+            np.save(os.path.join(root_dir, subject_id + '_netOut.npy'), batch_output['net_out'])
         return True
 
     def set_iteration_update(self, iteration_message):
