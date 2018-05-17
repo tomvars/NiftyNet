@@ -1,4 +1,5 @@
 import tensorflow as tf
+import math
 
 from niftynet.application.base_application import BaseApplication
 from niftynet.engine.application_factory import \
@@ -347,10 +348,34 @@ class SegmentationApplication(BaseApplication):
             #    average_over_devices=False, summary_type='image3_sagittal',
             #    collection=TF_SUMMARIES)
 
-            # outputs_collector.add_to_collection(
-            #    var=image, name='image',
-            #    average_over_devices=False,
-            #    collection=NETWORK_OUTPUT)
+            outputs_collector.add_to_collection(
+               var=tf.contrib.image.rotate(image[:, :, :, :, 0], 3 * math.pi / 2), name='T1',
+               average_over_devices=True, summary_type='image3_axial',
+               collection=TF_SUMMARIES)
+            outputs_collector.add_to_collection(
+                var=tf.contrib.image.rotate(image[:, :, :, :, 1], 3 * math.pi / 2), name='T1c',
+                average_over_devices=True, summary_type='image3_axial',
+                collection=TF_SUMMARIES)
+            outputs_collector.add_to_collection(
+                var=tf.contrib.image.rotate(image[:, :, :, :, 2], 3 * math.pi / 2), name='T2',
+                average_over_devices=True, summary_type='image3_axial',
+                collection=TF_SUMMARIES)
+
+            outputs_collector.add_to_collection(
+                var=tf.contrib.image.rotate(image[:, :, :, :, 3], 3 * math.pi / 2), name='Flair',
+                average_over_devices=True, summary_type='image3_axial',
+                collection=TF_SUMMARIES)
+
+            outputs_collector.add_to_collection(
+                var=tf.contrib.image.rotate((255.0/4.0)*(net_out[:, :, :, :, 2]*0.33 + net_out[:, :, :, :, 1]*0.66 + net_out[:, :, :, :, 0]*1.0), 3*math.pi/2), name='net_out',
+                average_over_devices=True, summary_type='image3_axial',
+                collection=TF_SUMMARIES)
+
+            outputs_collector.add_to_collection(
+                var=tf.contrib.image.rotate(tf.squeeze(data_dict.get('label', None)*(255.0/4.0)), 3*math.pi/2), name='label',
+                average_over_devices=True, summary_type='image3_axial',
+                collection=TF_SUMMARIES)
+
 
             # outputs_collector.add_to_collection(
             #    var=tf.reduce_mean(image), name='mean_image',
