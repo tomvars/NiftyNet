@@ -19,7 +19,7 @@ from niftynet.layer.discrete_label_normalisation import \
     DiscreteLabelNormalisationLayer
 from niftynet.layer.histogram_normalisation import \
     HistogramNormalisationLayer
-from niftynet.layer.loss_segmentation import LossFunction
+from niftynet.layer.loss_segmentation import LossFunction, generalised_dice_loss
 from niftynet.layer.mean_variance_normalisation import \
     MeanVarNormalisationLayer
 from niftynet.layer.pad import PadLayer
@@ -29,6 +29,7 @@ from niftynet.layer.rand_rotation import RandomRotationLayer
 from niftynet.layer.rand_spatial_scaling import RandomSpatialScalingLayer
 from niftynet.evaluation.segmentation_evaluator import SegmentationEvaluator
 from niftynet.layer.rand_elastic_deform import RandomElasticDeformationLayer
+from niftynet.utilities.ordinal_classification import y_ordinal_to_y, y_to_y_ordinal
 
 SUPPORTED_INPUT = set(['image', 'label', 'weight', 'sampler', 'inferred'])
 
@@ -267,9 +268,10 @@ class SegmentationApplication(BaseApplication):
             from tensorflow.contrib.layers.python.layers import regularizers
             w_regularizer = regularizers.l1_regularizer(decay)
             b_regularizer = regularizers.l1_regularizer(decay)
-
+        num_classes = self.segmentation_param.num_classes if not self.segmentation_param.ordinal_classification else self.segmentation_param.num_classes - 1
+        print(num_classes)
         self.net = ApplicationNetFactory.create(self.net_param.name)(
-            num_classes=self.segmentation_param.num_classes,
+            num_classes=num_classes,
             w_initializer=InitializerFactory.get_initializer(
                 name=self.net_param.weight_initializer),
             b_initializer=InitializerFactory.get_initializer(
@@ -310,6 +312,10 @@ class SegmentationApplication(BaseApplication):
             image = tf.cast(data_dict['image'], tf.float32)
             net_out = self.net(image, is_training=self.is_training)
 
+            if self.segmentation_param.ordinal_classification and data_dict.get('label', None) is not None:
+                ordinal_labels = y_to_y_ordinal(data_dict.get('label', None), num_classes=self.segmentation_param.num_classes)
+                print(ordinal_labels)
+                print(data_dict.get('label', None))
             with tf.name_scope('Optimiser'):
                 optimiser_class = OptimiserFactory.create(
                     name=self.action_param.optimiser)
@@ -321,7 +327,7 @@ class SegmentationApplication(BaseApplication):
                 softmax=self.segmentation_param.softmax)
             data_loss = loss_func(
                 prediction=net_out,
-                ground_truth=data_dict.get('label', None),
+                ground_truth=data_dict.get('label', None) if not self.segmentation_param.ordinal_classification else ordinal_labels,
                 weight_map=data_dict.get('weight', None))
             reg_losses = tf.get_collection(
                 tf.GraphKeys.REGULARIZATION_LOSSES)
@@ -343,44 +349,54 @@ class SegmentationApplication(BaseApplication):
                 average_over_devices=True, summary_type='scalar',
                 collection=TF_SUMMARIES)
 
-            # outputs_collector.add_to_collection(
-            #    var=image*180.0, name='image',
-            #    average_over_devices=False, summary_type='image3_sagittal',
-            #    collection=TF_SUMMARIES)
-
             outputs_collector.add_to_collection(
-               var=tf.contrib.image.rotate(image[:, :, :, :, 0], 3 * math.pi / 2), name='T1',
+               var=tf.contrib.image.rotate(image[:, :, :, :, 0], 3 * math.pi / 2)*255.0, name='T1',
                average_over_devices=True, summary_type='image3_axial',
                collection=TF_SUMMARIES)
             outputs_collector.add_to_collection(
-                var=tf.contrib.image.rotate(image[:, :, :, :, 1], 3 * math.pi / 2), name='T1c',
+                var=tf.contrib.image.rotate(image[:, :, :, :, 1], 3 * math.pi / 2)*255.0, name='T1c',
                 average_over_devices=True, summary_type='image3_axial',
                 collection=TF_SUMMARIES)
             outputs_collector.add_to_collection(
-                var=tf.contrib.image.rotate(image[:, :, :, :, 2], 3 * math.pi / 2), name='T2',
+                var=tf.contrib.image.rotate(image[:, :, :, :, 2], 3 * math.pi / 2)*255.0, name='T2',
                 average_over_devices=True, summary_type='image3_axial',
                 collection=TF_SUMMARIES)
 
             outputs_collector.add_to_collection(
-                var=tf.contrib.image.rotate(image[:, :, :, :, 3], 3 * math.pi / 2), name='Flair',
+                var=tf.contrib.image.rotate(image[:, :, :, :, 3], 3 * math.pi / 2)*255.0, name='Flair',
                 average_over_devices=True, summary_type='image3_axial',
                 collection=TF_SUMMARIES)
-
+            if self.segmentation_param.ordinal_classification:
+                net_out = y_ordinal_to_y(net_out, num_classes=self.segmentation_param.num_classes)
             outputs_collector.add_to_collection(
                 var=tf.contrib.image.rotate((255.0/4.0)*(net_out[:, :, :, :, 2]*0.33 + net_out[:, :, :, :, 1]*0.66 + net_out[:, :, :, :, 0]*1.0), 3*math.pi/2), name='net_out',
                 average_over_devices=True, summary_type='image3_axial',
                 collection=TF_SUMMARIES)
+            net_out_argmax = tf.cast(tf.argmax(net_out, axis=-1), tf.float32)
+            outputs_collector.add_to_collection(
+                var=tf.contrib.image.rotate((255.0 / 4.0)*net_out_argmax, 3 * math.pi / 2),
+                name='net_out_argmax',
+                average_over_devices=True, summary_type='image3_axial',
+                collection=TF_SUMMARIES)
+
 
             outputs_collector.add_to_collection(
                 var=tf.contrib.image.rotate(tf.squeeze(data_dict.get('label', None)*(255.0/4.0)), 3*math.pi/2), name='label',
                 average_over_devices=True, summary_type='image3_axial',
                 collection=TF_SUMMARIES)
 
+            outputs_collector.add_to_collection(
+                var=generalised_dice_loss(net_out,
+                          data_dict.get('label', None),
+                          weight_map=None,
+                          type_weight='Square'),
+                name='Generalised dice score',
+                average_over_devices=True,
+                summary_type='scalar',
+                collection=TF_SUMMARIES
+            )
 
-            # outputs_collector.add_to_collection(
-            #    var=tf.reduce_mean(image), name='mean_image',
-            #    average_over_devices=False, summary_type='scalar',
-            #    collection=CONSOLE)
+
         elif self.is_inference:
             # converting logits into final output for
             # classification probabilities or argmax classification labels

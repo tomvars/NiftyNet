@@ -171,6 +171,14 @@ def __add_segmentation_args(parser):
         choices=['foreground', 'label', 'cc'],
         default='foreground')
 
+    parser.add_argument(
+        "--ordinal_classification",
+        help="Map N outputs to N-1 ordinal outputs",
+        metavar='',
+        type=str2boolean,
+        default=False
+    )
+
     from niftynet.application.segmentation_application import SUPPORTED_INPUT
     parser = add_input_name_args(parser, SUPPORTED_INPUT)
     return parser
