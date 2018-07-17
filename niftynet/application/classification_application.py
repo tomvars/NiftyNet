@@ -310,6 +310,10 @@ class ClassificationApplication(BaseApplication):
                 var=data_loss, name='data_loss',
                 average_over_devices=True, summary_type='scalar',
                 collection=TF_SUMMARIES)
+            outputs_collector.add_to_collection(
+                var=net_out, name='predictions',
+                average_over_devices=True, summary_type='scalar',
+                collection=CONSOLE)
             self.add_confusion_matrix_summaries_(outputs_collector,
                                                  net_out,
                                                  data_dict)
@@ -333,7 +337,7 @@ class ClassificationApplication(BaseApplication):
                 print('OPTION C')
                 post_process_layer = PostProcessingLayer(
                     'IDENTITY', num_classes=num_classes)
-            net_out = post_process_layer(net_out)
+            # net_out = post_process_layer(net_out)
             print('net_out.shape may need to be resized:', net_out.shape)
             # exit()
             outputs_collector.add_to_collection(

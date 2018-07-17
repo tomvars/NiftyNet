@@ -27,7 +27,7 @@ class ResNet(BaseNet):
     def __init__(self,
                  num_classes,
                  n_features = [16, 64, 128, 256],
-                 n_blocks_per_resolution = 9,
+                 n_blocks_per_resolution = 10,
                  w_initializer=None,
                  w_regularizer=None,
                  b_initializer=None,
@@ -70,11 +70,8 @@ class ResNet(BaseNet):
         for block in layers.blocks:
             out = block(out, is_training)
         out = tf.expand_dims(tf.reduce_mean(tf.nn.relu(layers.bn(out, is_training)),axis=[1,2,3]), axis=[-1])
-        tf.logging.info('{} shape: {}'.format(out.name, out.shape))
         out =  layers.fc(out)
-        tf.logging.info('{} shape: {}'.format(out.name, out.shape))
         out = ActiLayer('softmax')(out)
-        tf.logging.info('Added softmax!')
         return out
         
 
@@ -120,7 +117,6 @@ class BottleneckBlock(TrainableLayer):
             out=layers.conv[1](out, is_training)
             out=layers.conv[2](out, is_training)
             out = layers.conv_shortcut(tmp, is_training) + out
-        tf.logging.info('{} shape: {}'.format(out.name, out.shape))
         return out
 
 DownResBlockDesc = namedtuple('DownResBlockDesc', ['blocks'])

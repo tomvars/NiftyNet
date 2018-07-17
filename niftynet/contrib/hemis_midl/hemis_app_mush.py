@@ -62,7 +62,7 @@ class BRATSApp(BaseApplication):
                 reader.initialise(data_param, task_param, file_list)
                 self.readers.append(reader)
         else:  # in the inference process use image input only
-            inference_reader = ImageReader(['image', 'label'])
+            inference_reader = ImageReader(SUPPORTED_INPUT)
             file_list = data_partitioner.inference_files
             inference_reader.initialise(data_param, task_param, file_list)
             self.readers = [inference_reader]
@@ -402,7 +402,15 @@ class BRATSApp(BaseApplication):
             outputs_collector.add_to_collection(
                 var=data_dict['image_location'], name='image_location',
                 average_over_devices=True, collection=NETWORK_OUTPUT)
-
+            outputs_collector.add_to_collection(
+                var=data_dict.get('modalities', None), name='modalitiesTrue',
+                average_over_devices=True, collection=NETWORK_OUTPUT)
+            outputs_collector.add_to_collection(
+                var=modality_scores, name='modalitiesPred',
+                average_over_devices=True, collection=NETWORK_OUTPUT)
+            outputs_collector.add_to_collection(
+                var=image, name='raw_image_tensor',
+                average_over_devices=True, collection=NETWORK_OUTPUT)
             self.output_decoder = ResizeSamplesAggregator(
                 image_reader=self.readers[0],
                 output_path=self.action_param.save_seg_dir,
@@ -413,18 +421,22 @@ class BRATSApp(BaseApplication):
         if not self.is_training:
             # return self.output_decoder.decode_batch(
             #     batch_output['window'], batch_output['location'])
-            prefix = '/home/tom/phd/MIDLNET_RESULTS_'
+            prefix = '/home/tom/phd/MIDLNET_RESULTS_testing'
             suffix = '_'.join(os.path.basename(self.data_param['input0'].path_to_search).split('_')[-2:])
             root_dir = prefix + suffix
             if not os.path.exists(root_dir):
                 print('MAKING DIR')
                 os.makedirs(root_dir)
-            print(root_dir)
             if batch_output['image_location'][0][0] == -1:
                 print('Skipping bad sample!...')
             subject_id = self.readers[0].get_subject_id(batch_output['image_location'][0][0])
+            np.save(os.path.join(root_dir, subject_id + '_rawImageTensor.npy'), batch_output['raw_image_tensor'])
+            np.save(os.path.join(root_dir, subject_id + '_modalitiesPred.npy'), batch_output['modalitiesPred'])
+            np.save(os.path.join(root_dir, subject_id + '_modalitiesTruth.npy'), batch_output['modalitiesTrue'])
             np.save(os.path.join(root_dir, subject_id + '_groundTruth.npy'), batch_output['ground_truth'])
             np.save(os.path.join(root_dir, subject_id + '_netOut.npy'), batch_output['net_out'])
+            print('subject_id', subject_id)
+            print('net_out', np.count_nonzero(batch_output['net_out']))
         return True
 
     def set_iteration_update(self, iteration_message):

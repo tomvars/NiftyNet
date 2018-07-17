@@ -80,7 +80,7 @@ class HeMISSampler(Layer, InputBatchQueueRunner):
             if not data:
                 break
             ##### Randomly drop modalities according to params #####
-            p_dict = {4: [0.5, 0.3, 0.15, 0.05], 3: [0.5, 0.3, 0.2], 2: [0.5, 0.5]}
+            p_dict = {4: [0.5, 0.3, 0.15, 0.05], 3: [0.5, 0.3, 0.2], 2: [0.5, 0.5], 1: [1.0]}
             data_shape_without_modality = list(data['image'].shape)[:-1]
             number_of_modalities = sum([1 if np.count_nonzero(data['image'][..., i]) > 0 else 0 for i in range(data['image'].shape[-1])])
             if number_of_modalities == 1:

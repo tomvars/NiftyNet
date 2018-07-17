@@ -197,7 +197,7 @@ class BRATSApp(BaseApplication):
             if self.net_param.decay > 0.0 and reg_losses:
                 reg_loss = tf.reduce_mean(
                     [tf.reduce_mean(reg_loss) for reg_loss in reg_losses])
-                loss = data_loss_seg + reg_loss + (data_loss_classification * class_loss_multiplier)
+                loss = 0.1 * data_loss_seg + reg_loss + 10 * (data_loss_classification * class_loss_multiplier)
             else:
                 loss = data_loss_seg
             # outputs_collector.add_to_collection(
@@ -240,6 +240,9 @@ class BRATSApp(BaseApplication):
                 var=data_loss_seg, name='dice_loss_seg',
                 average_over_devices=True, collection=CONSOLE)
             outputs_collector.add_to_collection(
+                var=loss, name='total_loss',
+                average_over_devices=True, collection=CONSOLE)
+            outputs_collector.add_to_collection(
                 var=data_loss_classification, name='class_loss',
                 average_over_devices=True, summary_type='scalar',
                 collection=TF_SUMMARIES)
@@ -247,7 +250,9 @@ class BRATSApp(BaseApplication):
                 var=data_loss_classification, name='class_loss',
                 average_over_devices=True, summary_type='scalar',
                 collection=CONSOLE)
-
+            outputs_collector.add_to_collection(
+                var=class_loss_multiplier, name='class_loss_multiplier',
+                average_over_devices=True, collection=CONSOLE)
             # outputs_collector.add_to_collection(
             #     var=modality_ground_truth, name='modality_ground_truth',
             #     average_over_devices=True, summary_type='scalar',

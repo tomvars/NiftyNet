@@ -193,10 +193,16 @@ def __add_classification_args(parser):
     parser.add_argument(
         "--with_bn",
         metavar='',
-        help="whether to map unique labels in the training set to "
-             "consecutive integers (the smallest label will be  mapped to 0)",
+        help="enable batch norm ",
         type=str2boolean,
         default=True)
+
+    parser.add_argument(
+        "--csv_labels",
+        metavar='',
+        help="read labels from a csv",
+        type=str2boolean,
+        default=False)
 
 
     from niftynet.application.classification_application import SUPPORTED_INPUT

@@ -309,7 +309,7 @@ class BRATSApp(BaseApplication):
         #     return self.output_decoder.decode_batch(
         #         batch_output['window'], batch_output['location'])
         # else:
-        prefix = '/home/tom/phd/HEMIS_RESULTS_'
+        prefix = '/home/tom/phd/HEMIS_RESULTS_v2_'
         suffix = '_'.join(os.path.basename(self.data_param['T1'].path_to_search).split('_')[-2:])
         root_dir = prefix + suffix
         if not os.path.exists(root_dir):
