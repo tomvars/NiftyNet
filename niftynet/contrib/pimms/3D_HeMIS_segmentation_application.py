@@ -296,9 +296,8 @@ class SegmentationApplication(BaseApplication):
                 data_dict = switch_sampler(for_training=True)
 
             image = tf.cast(data_dict['image'], tf.float32)
-            net_args = {'is_training': self.is_training,
-                        'keep_prob': self.net_param.keep_prob}
-            net_out = self.net(image, **net_args)
+            net_args = {'is_training': self.is_training}
+            net_out, class_out = self.net(image, **net_args)
 
             with tf.name_scope('Optimiser'):
                 optimiser_class = OptimiserFactory.create(
@@ -311,7 +310,7 @@ class SegmentationApplication(BaseApplication):
                 softmax=self.segmentation_param.softmax)
             data_loss = loss_func(
                 prediction=net_out,
-                ground_truth=data_dict.get('label', None),
+                ground_truth=data_dict.get('label', None)[..., 0],
                 weight_map=data_dict.get('weight', None))
             reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
             if self.net_param.decay > 0.0 and reg_losses:
@@ -325,8 +324,13 @@ class SegmentationApplication(BaseApplication):
             # collecting gradients variables
             gradients_collector.add_to_collection([grads])
             # collecting output variables
+
+            def my_tf_round(x, decimals=0):
+                multiplier = tf.constant(10 ** decimals, dtype=x.dtype)
+                return tf.round(x * multiplier) / multiplier
+
             outputs_collector.add_to_collection(
-                var=data_loss, name='loss',
+                var=my_tf_round(data_loss, 4), name='loss',
                 average_over_devices=False, collection=CONSOLE)
             outputs_collector.add_to_collection(
                 var=data_loss, name='loss',
@@ -338,28 +342,22 @@ class SegmentationApplication(BaseApplication):
                 average_over_devices=True, summary_type='image3_axial',
                 collection=TF_SUMMARIES)
             outputs_collector.add_to_collection(
-                var=tf.contrib.image.rotate(image[:, :, :, :, 1], 3 * math.pi / 2), name='T1c',
-                average_over_devices=True, summary_type='image3_axial',
-                collection=TF_SUMMARIES)
-            outputs_collector.add_to_collection(
-                var=tf.contrib.image.rotate(image[:, :, :, :, 2], 3 * math.pi / 2), name='T2',
+                var=tf.contrib.image.rotate(image[:, :, :, :, 1], 3 * math.pi / 2), name='T2',
                 average_over_devices=True, summary_type='image3_axial',
                 collection=TF_SUMMARIES)
 
             outputs_collector.add_to_collection(
-                var=tf.contrib.image.rotate(image[:, :, :, :, 3], 3 * math.pi / 2), name='Flair',
+                var=tf.contrib.image.rotate(image[:, :, :, :, 2], 3 * math.pi / 2), name='Flair',
                 average_over_devices=True, summary_type='image3_axial',
                 collection=TF_SUMMARIES)
 
             outputs_collector.add_to_collection(
-                var=tf.contrib.image.rotate((255.0 / 4.0) * (
-                net_out[:, :, :, :, 2] * 0.33 + net_out[:, :, :, :, 1] * 0.66 + net_out[:, :, :, :, 0] * 1.0),
-                                            3 * math.pi / 2), name='net_out',
+                var=net_out, name='net_out',
                 average_over_devices=True, summary_type='image3_axial',
                 collection=TF_SUMMARIES)
 
             outputs_collector.add_to_collection(
-                var=tf.contrib.image.rotate(tf.squeeze(data_dict.get('label', None) * (255.0 / 4.0)), 3 * math.pi / 2),
+                var=tf.contrib.image.rotate(tf.squeeze(data_dict.get('label', None)[..., 0] * (255.0 / 4.0)), 3 * math.pi / 2),
                 name='label',
                 average_over_devices=True, summary_type='image3_axial',
                 collection=TF_SUMMARIES)

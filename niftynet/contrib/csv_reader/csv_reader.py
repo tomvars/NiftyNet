@@ -30,10 +30,10 @@ class CSVReader(Layer):
         return [np.eye(len(self.label_names))[self.label_names.index(label)] for label in labels]
     
     def layer_op(self, idx=None, shuffle=True):
-        # def apply_expand_dims(x, n):
-        #     if n==0:
-        #         return x
-        #     return np.expand_dims(apply_expand_dims(x, n - 1), -1)
+        def apply_expand_dims(x, n):
+            if n==0:
+                return x
+            return np.expand_dims(apply_expand_dims(x, n - 1), -1)
         data = self._labels[idx]
         while len(data.shape) < 4:
             data = np.expand_dims(data, -1)

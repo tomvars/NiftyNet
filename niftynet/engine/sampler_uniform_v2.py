@@ -60,6 +60,14 @@ class UniformSampler(ImageWindowDataset):
             ``{image_modality: data_array, image_location: n_samples * 7}``
         """
         image_id, data, _ = self.reader(idx=idx, shuffle=True)
+        ##### Randomly drop modalities according to params #####
+        modalities_to_drop = int(np.random.choice([0, 1, 2], 1, p=[0.5, 0.3, 0.2]))
+        data_shape_without_modality = list(data['image'].shape)[:-1]
+        random_indices = np.random.permutation([0, 1, 2])
+        for idx in range(modalities_to_drop):
+            idx_to_drop = random_indices[idx]
+            data['image'][..., idx_to_drop] = np.zeros(shape=data_shape_without_modality)
+        ########################################################
         image_shapes = dict(
             (name, data[name].shape) for name in self.window.names)
         static_window_shapes = self.window.match_image_shapes(image_shapes)
