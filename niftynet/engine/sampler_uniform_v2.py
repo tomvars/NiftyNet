@@ -60,7 +60,12 @@ class UniformSampler(ImageWindowDataset):
             ``{image_modality: data_array, image_location: n_samples * 7}``
         """
         image_id, data, _ = self.reader(idx=idx, shuffle=True)
+        print('range of values for BinLesion', np.min(data['label'][..., 0]), np.max(data['label'][..., 0]))
+        print('range of values for Parcellation', np.min(data['label'][..., 1]), np.max(data['label'][..., 1]))
+        print('unique values for Parcellation: \n')
+        print(np.unique(data['label'][..., 1]))
         ##### Randomly drop modalities according to params #####
+        tf.logging.info('Image_id %s' % image_id)
         modalities_to_drop = int(np.random.choice([0, 1, 2], 1, p=[0.5, 0.3, 0.2]))
         data_shape_without_modality = list(data['image'].shape)[:-1]
         random_indices = np.random.permutation([0, 1, 2])

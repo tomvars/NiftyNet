@@ -86,6 +86,7 @@ class SegmentationApplication(BaseApplication):
             reader_phase = None
         file_lists = data_partitioner.get_file_lists_by(
             phase=reader_phase, action=self.action)
+        print(data_param, task_param)
         self.readers = [
             ImageReader(reader_names).initialise(
                 data_param, task_param, file_list) for file_list in file_lists]
@@ -297,28 +298,45 @@ class SegmentationApplication(BaseApplication):
 
             image = tf.cast(data_dict['image'], tf.float32)
             net_args = {'is_training': self.is_training}
-            net_out, class_out = self.net(image, **net_args)
+            net_out, brain_parcellation, class_out = self.net(image, **net_args)
 
             with tf.name_scope('Optimiser'):
                 optimiser_class = OptimiserFactory.create(
                     name=self.action_param.optimiser)
                 self.optimiser = optimiser_class.get_instance(
                     learning_rate=self.action_param.lr)
-            loss_func = LossFunction(
+
+            ### All the dims in the loss functions
+            tf.logging.info(data_dict.get('label', None))
+            tf.logging.info(data_dict.get('label', None)[..., 0])
+            tf.logging.info(data_dict.get('label', None)[..., 1])
+            tf.logging.info(net_out)
+            tf.logging.info(brain_parcellation)
+
+            seg_loss_func = LossFunction(
                 n_class=self.segmentation_param.num_classes,
                 loss_type=self.action_param.loss_type,
                 softmax=self.segmentation_param.softmax)
-            data_loss = loss_func(
+            seg_loss = seg_loss_func(
                 prediction=net_out,
-                ground_truth=data_dict.get('label', None)[..., 0],
+                ground_truth=data_dict.get('label', None),
+                weight_map=data_dict.get('weight', None))
+
+            brain_parcellation_loss_func = LossFunction(
+                n_class=self.segmentation_param.num_classes,
+                loss_type=self.action_param.loss_type,
+                softmax=self.segmentation_param.softmax)
+            brain_parcellation_loss = brain_parcellation_loss_func(
+                prediction=net_out,
+                ground_truth=data_dict.get('label', None),
                 weight_map=data_dict.get('weight', None))
             reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
             if self.net_param.decay > 0.0 and reg_losses:
                 reg_loss = tf.reduce_mean(
                     [tf.reduce_mean(reg_loss) for reg_loss in reg_losses])
-                loss = data_loss + reg_loss
+                loss = seg_loss + brain_parcellation_loss + reg_loss
             else:
-                loss = data_loss
+                loss = seg_loss + brain_parcellation_loss
             grads = self.optimiser.compute_gradients(
                 loss, colocate_gradients_with_ops=True)
             # collecting gradients variables
@@ -330,10 +348,10 @@ class SegmentationApplication(BaseApplication):
                 return tf.round(x * multiplier) / multiplier
 
             outputs_collector.add_to_collection(
-                var=my_tf_round(data_loss, 4), name='loss',
+                var=my_tf_round(loss, 4), name='loss',
                 average_over_devices=False, collection=CONSOLE)
             outputs_collector.add_to_collection(
-                var=data_loss, name='loss',
+                var=loss, name='loss',
                 average_over_devices=True, summary_type='scalar',
                 collection=TF_SUMMARIES)
 
@@ -356,11 +374,11 @@ class SegmentationApplication(BaseApplication):
                 average_over_devices=True, summary_type='image3_axial',
                 collection=TF_SUMMARIES)
 
-            outputs_collector.add_to_collection(
-                var=tf.contrib.image.rotate(tf.squeeze(data_dict.get('label', None)[..., 0] * (255.0 / 4.0)), 3 * math.pi / 2),
-                name='label',
-                average_over_devices=True, summary_type='image3_axial',
-                collection=TF_SUMMARIES)
+            # outputs_collector.add_to_collection(
+            #     var=tf.contrib.image.rotate(tf.squeeze(data_dict.get('label', None)[..., 0] * (255.0 / 4.0)), 3 * math.pi / 2),
+            #     name='label',
+            #     average_over_devices=True, summary_type='image3_axial',
+            #     collection=TF_SUMMARIES)
 
         elif self.is_inference:
             # converting logits into final output for

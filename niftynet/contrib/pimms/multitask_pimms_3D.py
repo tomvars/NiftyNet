@@ -90,12 +90,17 @@ class MultitaskPIMMS3D(BaseNet):
         abstraction_op = HeMISAbstractionBlock(pooling_type='average')
         abstraction_tensor = abstraction_op(full_backend_tensor, is_training)
         tf.logging.info('Abstraction output dims: %s' % abstraction_tensor.shape)
-        frontend_op = HighRes3dFrontendBlock(num_classes=self.num_classes,
+        segmentation_op = HighRes3dFrontendBlock(num_classes=self.num_classes,
                                              w_regularizer = self.regularizers['w'])
-        frontend_tensor = frontend_op(abstraction_tensor, is_training)
-        tf.logging.info('Frontend output dims: %s' % frontend_tensor.shape)
-        return frontend_tensor, tf.reshape(tf.transpose(tf.stack(modality_scores, axis=-1), [0, 2, 1]),
-                                           shape=[n_subj_in_batch*n_ims_per_subj, n_modalities])
+        segmentation_tensor = segmentation_op(abstraction_tensor, is_training)
+        tf.logging.info('Segmentation frontend output dims: %s' % segmentation_tensor.shape)
+        brain_parcellation_op = HighRes3dFrontendBlock(num_classes=160,
+                                             w_regularizer=self.regularizers['w'])
+        brain_parcellation_tensor = brain_parcellation_op(abstraction_tensor, is_training)
+        tf.logging.info('Brain Parcellation frontend output dims: %s' % brain_parcellation_tensor.shape)
+        classification_tensor = tf.reshape(tf.transpose(tf.stack(modality_scores, axis=-1), [0, 2, 1]), shape=[n_subj_in_batch*n_ims_per_subj, n_modalities])
+        tf.logging.info('Classification tensor output dims: %s' % classification_tensor.shape)
+        return segmentation_tensor, brain_parcellation_tensor, classification_tensor
 
 
 class HighRes3DNetSmallBackendBlock(BaseNet):
