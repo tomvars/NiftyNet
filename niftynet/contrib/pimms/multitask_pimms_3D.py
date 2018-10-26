@@ -57,6 +57,7 @@ class MultitaskPIMMS3D(BaseNet):
                 #### Do this conditionally? #####
                 scope.reuse_variables()
                 out = modality_classifier(tf.expand_dims(input_tensor[..., z_size//2, i], -1), True)
+                out = tf.check_numerics(out, message='Modality classifier outputs NaNs')
                 modality_scores.append(out)
 
         modality_tensor = tf.expand_dims(tf.expand_dims(tf.expand_dims(tf.stack(modality_scores, axis=-1), axis=2), axis=2), axis=2)
@@ -98,7 +99,7 @@ class MultitaskPIMMS3D(BaseNet):
                                              w_regularizer=self.regularizers['w'])
         brain_parcellation_tensor = brain_parcellation_op(abstraction_tensor, is_training)
         tf.logging.info('Brain Parcellation frontend output dims: %s' % brain_parcellation_tensor.shape)
-        classification_tensor = tf.reshape(tf.transpose(tf.stack(modality_scores, axis=-1), [0, 2, 1]), shape=[n_subj_in_batch*n_ims_per_subj, n_modalities])
+        classification_tensor = tf.reshape(tf.transpose(tf.stack(modality_scores, axis=-1), [0, 2, 1]), shape=[n_subj_in_batch, n_ims_per_subj, n_modalities])
         tf.logging.info('Classification tensor output dims: %s' % classification_tensor.shape)
         return segmentation_tensor, brain_parcellation_tensor, classification_tensor
 
@@ -299,7 +300,7 @@ class HighRes3dFrontendBlock(BaseNet):
         fc_layer = ConvolutionalLayer(
             n_output_chns=params['n_features'],
             kernel_size=params['kernel_size'],
-            acti_func='softmax',
+            acti_func=None,
             w_initializer=self.initializers['w'],
             w_regularizer=self.regularizers['w'],
             name=params['name'])

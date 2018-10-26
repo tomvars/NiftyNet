@@ -383,29 +383,26 @@ class ImageReader(Layer):
             raise
 
 
-def _filename_to_image_list(file_list, mod_dict, data_param):
+def _filename_to_image_list(file_list, mod_dict, data_param, num_threads=10):
     """
     Converting a list of filenames to a list of image objects,
     Properties (e.g. interp_order) are added to each object
     """
+    from functools import partial
+    import multiprocessing
     volume_list = []
-    valid_idx = []
-    for idx in range(len(file_list)):
+    valid_idxs = []
+    tf.logging.info(f'Converting a list of filenames to a list of image objects with: num_threads:{num_threads}')
+    pool = multiprocessing.Pool(num_threads)  # Should work if num_threads = 1
+    func = partial(_create_image_multiprocessing_wrapper, file_list=file_list, data_param=data_param, mod_dict=mod_dict)
+    for idx, (_dict, valid_idx) in enumerate(pool.imap_unordered(func=func, iterable=range(len(file_list)))):
         # create image instance for each subject
         print_progress_bar(idx, len(file_list),
                            prefix='reading datasets headers',
                            decimals=1, length=10, fill='*')
-
-        # combine fieldnames and volumes as a dictionary
-        _dict = {}
-        for field, modalities in mod_dict.items():
-            _dict[field] = _create_image(
-                file_list, idx, modalities, data_param)
-
-        # skipping the subject if there're missing image components
         if _dict and None not in list(_dict.values()):
             volume_list.append(_dict)
-            valid_idx.append(idx)
+            valid_idxs.append(valid_idx)
 
     if not volume_list:
         tf.logging.fatal(
@@ -420,6 +417,13 @@ def _filename_to_image_list(file_list, mod_dict, data_param):
             "foo_subject42_bar.nii.gz, and the subject id is _subject42_.")
         raise IOError
     return volume_list, file_list.iloc[valid_idx]
+
+def _create_image_multiprocessing_wrapper(idx, file_list, data_param, mod_dict):
+    _dict = {}
+    for field, modalities in mod_dict.items():
+        _dict[field] = _create_image(file_list, idx, modalities, data_param)
+    # skipping the subject if there're missing image components
+    return _dict, idx
 
 
 def _create_image(file_list, idx, modalities, data_param):

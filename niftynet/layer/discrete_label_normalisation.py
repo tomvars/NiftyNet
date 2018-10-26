@@ -2,6 +2,7 @@
 from __future__ import absolute_import, print_function, division
 
 import os
+import multiprocessing
 
 import numpy as np
 import tensorflow as tf
@@ -18,6 +19,7 @@ class DiscreteLabelNormalisationLayer(DataDependentLayer, Invertible):
                  image_name,
                  modalities,
                  model_filename=None,
+                 num_threads=1,
                  name='label_norm'):
 
         super(DiscreteLabelNormalisationLayer, self).__init__(name=name)
@@ -25,6 +27,7 @@ class DiscreteLabelNormalisationLayer(DataDependentLayer, Invertible):
         # modalities are listed in self.modalities
         self.image_name = image_name
         self.modalities = None
+        self.num_threads = num_threads
         if isinstance(modalities, (list, tuple)):
             if len(modalities) > 1:
                 raise NotImplementedError(
@@ -130,11 +133,12 @@ class DiscreteLabelNormalisationLayer(DataDependentLayer, Invertible):
                     self.image_name,
                     self.modalities,
                     len(self.label_map[self.key[0]])))
+            print(self.label_map)
             return
         tf.logging.info(
             "Looking for the set of unique discrete labels from input {}"
             " using {} subjects".format(self.image_name, len(image_list)))
-        label_map = find_set_of_labels(image_list, self.image_name, self.key)
+        label_map = find_set_of_labels(image_list, self.image_name, self.key, num_threads=self.num_threads)
         # merging trained_mapping dict and self.mapping dict
         self.label_map.update(label_map)
         all_maps = hs.read_mapping_file(self.model_file)
@@ -142,23 +146,27 @@ class DiscreteLabelNormalisationLayer(DataDependentLayer, Invertible):
         hs.write_all_mod_mapping(self.model_file, all_maps)
 
 
-def find_set_of_labels(image_list, field, output_key):
+def get_unique_labels(image, field):
+    assert field in image, \
+        "label normalisation layer requires {} input, " \
+        "however it is not provided in the config file.\n" \
+        "Please consider setting " \
+        "label_normalisation to False.".format(field)
+    unique_label = np.unique(image[field].get_data())
+    return unique_label
+
+def find_set_of_labels(image_list, field, output_key, num_threads=1):
+    from functools import partial
+    tf.logging.info(f'Finding set of labels with: num_threads:{num_threads}')
+    pool = multiprocessing.Pool(num_threads) # Should work if num_threads = 1
+
     label_set = set()
     if field in image_list[0] :
-        for idx, image in enumerate(image_list):
-            assert field in image, \
-                "label normalisation layer requires {} input, " \
-                "however it is not provided in the config file.\n" \
-                "Please consider setting " \
-                "label_normalisation to False.".format(field)
+        for idx, unique_label in enumerate(pool.imap_unordered(partial(get_unique_labels, field=field), image_list)):
+        # for idx, image in enumerate(image_list):
             print_progress_bar(idx, len(image_list),
                                prefix='searching unique labels from files',
                                decimals=1, length=10, fill='*')
-            unique_label = np.unique(image[field].get_data())
-            if len(unique_label) > 500 or len(unique_label) <= 1:
-                tf.logging.warning(
-                    'unusual discrete values: number of unique '
-                    'labels to normalise %s', len(unique_label))
             label_set.update(set(unique_label))
         label_set = list(label_set)
         label_set.sort()
@@ -170,4 +178,5 @@ def find_set_of_labels(image_list, field, output_key):
         tf.logging.fatal("unable to create mappings keys: %s, image name %s",
                          output_key, field)
         raise
+    pool.close()
     return mapping_from_to

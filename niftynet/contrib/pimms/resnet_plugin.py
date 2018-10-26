@@ -72,6 +72,7 @@ class ResNet(BaseNet):
         layers = self.create()
         out = layers.conv1(images, is_training)
         for block in layers.blocks:
+            out = tf.check_numerics(out, message='NaNs in the blocks')
             out = block(out, is_training)
         out = tf.expand_dims(tf.reduce_mean(tf.nn.relu(layers.bn(out, is_training)), axis=[1, 2, 3]), axis=[-1])
         tf.logging.info('{} shape: {}'.format(out.name, out.shape))

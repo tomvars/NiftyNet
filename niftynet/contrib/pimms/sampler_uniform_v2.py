@@ -10,10 +10,11 @@ import numpy as np
 import tensorflow as tf
 
 from niftynet.engine.image_window_dataset import ImageWindowDataset
+from niftynet.contrib.csv_reader.sampler_csv_rows import ImageWindowDatasetCSV
 from niftynet.engine.image_window import N_SPATIAL, LOCATION_FORMAT
 
 
-class UniformSampler(ImageWindowDataset):
+class UniformSampler(ImageWindowDatasetCSV):
     """
     This class generates samples by uniformly sampling each input volume
     currently the coordinates are randomised for spatial dims only,
@@ -25,14 +26,16 @@ class UniformSampler(ImageWindowDataset):
 
     def __init__(self,
                  reader,
-                 window_sizes,
+                 csv_reader=None,
+                 window_sizes=None,
                  batch_size=1,
                  windows_per_image=1,
                  queue_length=10,
                  name='uniform_sampler_v2'):
-        ImageWindowDataset.__init__(
+        ImageWindowDatasetCSV.__init__(
             self,
             reader=reader,
+            csv_reader=csv_reader,
             window_sizes=window_sizes,
             batch_size=batch_size,
             windows_per_image=windows_per_image,
@@ -64,9 +67,11 @@ class UniformSampler(ImageWindowDataset):
         modalities_to_drop = int(np.random.choice([0, 1, 2], 1, p=[0.5, 0.3, 0.2]))
         data_shape_without_modality = list(data['image'].shape)[:-1]
         random_indices = np.random.permutation([0, 1, 2])
+        dropped_indices = []
         for idx in range(modalities_to_drop):
             idx_to_drop = random_indices[idx]
             data['image'][..., idx_to_drop] = np.zeros(shape=data_shape_without_modality)
+            dropped_indices.append(idx_to_drop)
         ########################################################
         image_shapes = dict(
             (name, data[name].shape) for name in self.window.names)
@@ -118,6 +123,10 @@ class UniformSampler(ImageWindowDataset):
         # the output image shape should be
         # [enqueue_batch_size, x, y, z, time, modality]
         # where enqueue_batch_size = windows_per_image
+        if self.csv_reader is not None:
+            _, label_dict, _ = self.csv_reader(idx=image_id)
+            output_dict['label'] = np.squeeze(label_dict['label'], axis=0)
+            output_dict['label_location'] = output_dict['image_location']
         return output_dict
 
     def _spatial_coordinates_generator(self,

@@ -340,6 +340,13 @@ def add_network_args(parser):
         default=5)
 
     parser.add_argument(
+        "--num_threads",
+        help="Set number of threads used for image loading",
+        metavar='',
+        type=int,
+        default=5)
+
+    parser.add_argument(
         "--multimod_foreground_type",
         choices=list(
             niftynet.layer.binary_masking.SUPPORTED_MULTIMOD_MASK_TYPES),
