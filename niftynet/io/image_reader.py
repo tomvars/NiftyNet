@@ -3,7 +3,6 @@
 from __future__ import absolute_import, division, print_function
 
 from copy import deepcopy
-
 import argparse
 import numpy as np
 import pandas
@@ -21,8 +20,8 @@ from niftynet.utilities.util_common import look_up_operations
 
 DEFAULT_INTERP_ORDER = 1
 SUPPORTED_DATA_SPEC = {
-    'csv_file', 'path_to_search',
-    'filename_contains', 'filename_not_contains', 'filename_removefromid',
+    'csv_path_file', 'path_to_search', 'csv_data_file', 'filename_removefromid',
+    'filename_contains', 'filename_not_contains', 'to_ohe',
     'interp_order', 'loader', 'pixdim', 'axcodes', 'spatial_window_size'}
 
 
@@ -407,7 +406,7 @@ def _filename_to_image_list(file_list, mod_dict, data_param, num_threads=10):
     if not volume_list:
         tf.logging.fatal(
             "Empty filename lists, please check the csv "
-            "files. (removing csv_file keyword if it is in the config file "
+            "files. (removing csv_path_file keyword if it is in the config file "
             "to automatically search folders and generate new csv "
             "files again)\n\n"
             "Please note in the matched file names, each subject id are "
@@ -472,7 +471,6 @@ def _create_image(file_list, idx, modalities, data_param):
                         'output_axcodes': axcodes,
                         'loader': loader}
     return ImageFactory.create_instance(**image_properties)
-
 
 def param_to_dict(input_data_param):
     """
