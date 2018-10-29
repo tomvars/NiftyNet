@@ -123,6 +123,8 @@ SUPPORTED_LOSS_REGRESSION = {
 SUPPORTED_LOSS_CLASSIFICATION = {
     "CrossEntropy":
         'niftynet.layer.loss_classification.cross_entropy',
+    "MultiLabelCrossEntropy":
+        'niftynet.layer.loss_classification.multi_label_cross_entropy'
 }
 
 

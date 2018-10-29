@@ -16,10 +16,12 @@ class LossFunction(Layer):
                  n_class,
                  loss_type='CrossEntropy',
                  loss_func_params=None,
+                 multilabel=False,
                  name='loss_function'):
 
         super(LossFunction, self).__init__(name=name)
         self._num_classes = n_class
+        self.multilabel = multilabel
         if loss_func_params is not None:
             self._loss_func_params = loss_func_params
         else:
@@ -47,17 +49,19 @@ class LossFunction(Layer):
         """
 
         with tf.device('/cpu:0'):
-            if ground_truth is not None:
+            if ground_truth is not None and not self.multilabel:
                 ground_truth = tf.reshape(ground_truth, [-1])
-
-            if not isinstance(prediction, (list, tuple)):
-                prediction = [prediction]
-            # prediction should be a list for holistic networks
-            if self._num_classes > 0:
-                # reshape the prediction to [n_voxels , num_classes]
-                prediction = [tf.reshape(pred, [-1, self._num_classes])
-                              for pred in prediction]
-
+                if not isinstance(prediction, (list, tuple)):
+                    prediction = [prediction]
+                # prediction should be a list for holistic networks
+                if self._num_classes > 0:
+                    # reshape the prediction to [n_voxels , num_classes]
+                    prediction = [tf.reshape(pred, [-1, self._num_classes])
+                                  for pred in prediction]
+            else:
+                ground_truth = tf.keras.backend.repeat_elements(ground_truth, ground_truth.shape[1], axis=-1)
+                if not isinstance(prediction, (list, tuple)):
+                    prediction = [prediction]
             data_loss = []
             for pred in prediction:
                 if self._loss_func_params:
@@ -81,3 +85,17 @@ def cross_entropy(prediction,
     ground_truth = tf.to_int64(ground_truth)
     loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=prediction, labels=ground_truth)
     return loss
+
+
+def multi_label_cross_entropy(prediction,
+                              ground_truth):
+    ground_truth = tf.to_float(ground_truth)
+    prediction = tf.to_float(prediction)
+    print(ground_truth)
+    print(prediction)
+    loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=prediction, labels=ground_truth)
+    return loss
+
+
+def _tf_repeat(arr, repeats):
+    return tf.py_func(np.repeat, [arr, repeats], tf.int64)

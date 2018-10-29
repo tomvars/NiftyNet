@@ -11,6 +11,7 @@ import tensorflow as tf
 
 from niftynet.engine.image_window_dataset import ImageWindowDataset
 from niftynet.contrib.csv_reader.sampler_csv_rows import ImageWindowDatasetCSV
+from niftynet.contrib.csv_reader.csv_reader import apply_niftynet_format_to_data
 from niftynet.engine.image_window import N_SPATIAL, LOCATION_FORMAT
 
 
@@ -72,7 +73,11 @@ class UniformSampler(ImageWindowDatasetCSV):
             idx_to_drop = random_indices[idx]
             data['image'][..., idx_to_drop] = np.zeros(shape=data_shape_without_modality)
             dropped_indices.append(idx_to_drop)
+        # Randomly permute the inputs
+        permuted_indices = np.random.permutation([0, 1, 2])
+        data['image'] = data['image'][..., permuted_indices]
         ########################################################
+
         image_shapes = dict(
             (name, data[name].shape) for name in self.window.names)
         static_window_shapes = self.window.match_image_shapes(image_shapes)
@@ -124,9 +129,16 @@ class UniformSampler(ImageWindowDatasetCSV):
         # [enqueue_batch_size, x, y, z, time, modality]
         # where enqueue_batch_size = windows_per_image
         if self.csv_reader is not None:
+            print('Csv reader initialized')
             _, label_dict, _ = self.csv_reader(idx=image_id)
-            output_dict['label'] = np.squeeze(label_dict['label'], axis=0)
-            output_dict['label_location'] = output_dict['image_location']
+            output_dict.update(label_dict)
+
+            for name in self.csv_reader.names:
+                output_dict[name + '_location'] = output_dict['image_location']
+        # ###### Update the output_dict with the permuted modalities ######
+        # output_dict['modality_label'] = apply_niftynet_format_to_data(permuted_indices)
+        # output_dict['modality_label_location'] = output_dict['image_location']
+        # #################################################################
         return output_dict
 
     def _spatial_coordinates_generator(self,
@@ -196,6 +208,29 @@ class UniformSampler(ImageWindowDatasetCSV):
             all_coordinates[mod] = spatial_coords
 
         return all_coordinates
+
+    # @property
+    # def shapes(self):
+    #     """
+    #     returns a dictionary of sampler output tensor shapes
+    #     """
+    #     assert self.window, 'Unknown output shapes: self.window not initialised'
+    #     shape_dict = self.window.tf_shapes
+    #     print(shape_dict)
+    #     shape_dict.update({'modality_label': (1, 3, 1, 1, 1, 1),
+    #                        'modality_label_location': (1, 7)})
+    #     return shape_dict
+    #
+    # @property
+    # def tf_dtypes(self):
+    #     """
+    #     returns a dictionary of sampler output tensorflow dtypes
+    #     """
+    #     assert self.window, 'Unknown output shapes: self.window not initialised'
+    #     shape_dict = self.window.tf_dtypes
+    #     shape_dict.update({'modality_label': tf.float32,
+    #                        'modality_location': tf.int32})
+    #     return shape_dict
 
 
 def rand_spatial_coordinates(

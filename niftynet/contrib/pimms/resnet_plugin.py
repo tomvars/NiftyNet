@@ -78,7 +78,7 @@ class ResNet(BaseNet):
         tf.logging.info('{} shape: {}'.format(out.name, out.shape))
         out = layers.fc(out)
         tf.logging.info('{} shape: {}'.format(out.name, out.shape))
-        out = ActiLayer('softmax')(out)
+        # out = ActiLayer('softmax')(out)
         return out
 
 

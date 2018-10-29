@@ -31,7 +31,7 @@ from niftynet.layer.rand_spatial_scaling import RandomSpatialScalingLayer
 from niftynet.evaluation.segmentation_evaluator import SegmentationEvaluator
 from niftynet.layer.rand_elastic_deform import RandomElasticDeformationLayer
 
-SUPPORTED_INPUT = set(['image', 'label', 'weight', 'sampler', 'inferred'])
+SUPPORTED_INPUT = set(['image', 'label', 'modality_label', 'weight', 'sampler', 'inferred'])
 
 
 class SegmentationApplication(BaseApplication):

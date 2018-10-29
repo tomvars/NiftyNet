@@ -14,6 +14,7 @@ from niftynet.engine.sampler_balanced_v2 import BalancedSampler
 from niftynet.engine.windows_aggregator_grid import GridSamplesAggregator
 from niftynet.engine.windows_aggregator_resize import ResizeSamplesAggregator
 from niftynet.io.image_reader import ImageReader
+from niftynet.contrib.csv_reader.csv_reader import CSVReader
 from niftynet.layer.binary_masking import BinaryMaskingLayer
 from niftynet.layer.discrete_label_normalisation import \
     DiscreteLabelNormalisationLayer
@@ -31,7 +32,7 @@ from niftynet.layer.rand_spatial_scaling import RandomSpatialScalingLayer
 from niftynet.evaluation.segmentation_evaluator import SegmentationEvaluator
 from niftynet.layer.rand_elastic_deform import RandomElasticDeformationLayer
 
-SUPPORTED_INPUT = set(['image', 'label', 'weight', 'sampler', 'inferred'])
+SUPPORTED_INPUT = set(['image', 'label', 'modality_label', 'weight', 'sampler', 'inferred'])
 
 
 class SegmentationApplication(BaseApplication):
@@ -71,6 +72,8 @@ class SegmentationApplication(BaseApplication):
         # initialise input image readers
         if self.is_training:
             reader_names = ('image', 'label', 'weight', 'sampler')
+            csv_reader_names = ('modality_label',)
+            # csv_reader_names = ('',)
         elif self.is_inference:
             # in the inference process use `image` input only
             reader_names = ('image',)
@@ -87,10 +90,12 @@ class SegmentationApplication(BaseApplication):
             reader_phase = None
         file_lists = data_partitioner.get_file_lists_by(
             phase=reader_phase, action=self.action)
+        self.csv_readers = [
+            CSVReader(csv_reader_names).initialise(
+                data_param, task_param, file_list) for file_list in file_lists]
         self.readers = [
             ImageReader(reader_names).initialise(
                 data_param, task_param, file_list) for file_list in file_lists]
-
         # initialise input preprocessing layers
         foreground_masking_layer = BinaryMaskingLayer(
             type_str=self.net_param.foreground_type,
@@ -187,12 +192,13 @@ class SegmentationApplication(BaseApplication):
 
     def initialise_uniform_sampler(self):
         self.sampler = [[UniformSampler(
-            reader=reader,
+            reader=image_reader,
+            csv_reader=csv_reader,
             window_sizes=self.data_param,
             batch_size=self.net_param.batch_size,
             windows_per_image=self.action_param.sample_per_volume,
-            queue_length=self.net_param.queue_length) for reader in
-            self.readers]]
+            queue_length=self.net_param.queue_length) for image_reader, csv_reader in
+            zip(self.readers, self.csv_readers)]]
 
     def initialise_weighted_sampler(self):
         self.sampler = [[WeightedSampler(
@@ -339,23 +345,29 @@ class SegmentationApplication(BaseApplication):
                 weight_map=data_dict.get('weight', None))
 
             classification_loss_func = LossFunctionClass(
-                n_class=2,
-                loss_type='CrossEntropy'
+                n_class=3,
+                loss_type='MultiLabelCrossEntropy',
+                multilabel=True
             )
 
+            modality_classification_loss = classification_loss_func(
+                prediction=class_out,
+                ground_truth=data_dict.get('modality_label', None)
+            )
+            print("data_dict.get('modality_label', None)", data_dict.get('modality_label', None))
+            print("class_out", class_out)
             reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
             if self.net_param.decay > 0.0 and reg_losses:
                 reg_loss = tf.reduce_mean(
                     [tf.reduce_mean(reg_loss) for reg_loss in reg_losses])
-                loss = seg_loss + brain_parcellation_loss + reg_loss
+                loss = seg_loss + brain_parcellation_loss + reg_loss + modality_classification_loss
             else:
-                loss = seg_loss + brain_parcellation_loss
+                loss = seg_loss + brain_parcellation_loss + modality_classification_loss
             grads = self.optimiser.compute_gradients(
                 loss, colocate_gradients_with_ops=True)
             # collecting gradients variables
 
-            grads = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in grads]#if 'modality_classifier' not in var.name]
-            print([(var, var.name) for grad, var in grads])
+            grads = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in grads]# if 'modality_classifier' not in var.name]
             gradients_collector.add_to_collection([grads])
             # collecting output variables
 
@@ -380,17 +392,17 @@ class SegmentationApplication(BaseApplication):
                 average_over_devices=False, collection=CONSOLE)
 
             outputs_collector.add_to_collection(
+                var=my_tf_round(modality_classification_loss, 4),
+                name='modality_classification_loss',
+                average_over_devices=False, collection=CONSOLE)
+
+            outputs_collector.add_to_collection(
                 var=class_out, name='class_out',
                 average_over_devices=False, collection=CONSOLE)
 
             # outputs_collector.add_to_collection(
             #     var=my_tf_round(reg_loss, 4), name='reg_loss',
             #     average_over_devices=False, collection=CONSOLE)
-
-            outputs_collector.add_to_collection(
-                var=loss, name='loss',
-                average_over_devices=True, summary_type='scalar',
-                collection=TF_SUMMARIES)
 
             outputs_collector.add_to_collection(
                 var=loss, name='loss',

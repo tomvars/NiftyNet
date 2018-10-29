@@ -57,7 +57,7 @@ class MultitaskPIMMS3D(BaseNet):
                 #### Do this conditionally? #####
                 scope.reuse_variables()
                 out = modality_classifier(tf.expand_dims(input_tensor[..., z_size//2, i], -1), True)
-                out = tf.check_numerics(out, message='Modality classifier outputs NaNs')
+                # out = tf.check_numerics(out, message='Modality classifier outputs NaNs')
                 modality_scores.append(out)
 
         modality_tensor = tf.expand_dims(tf.expand_dims(tf.expand_dims(tf.stack(modality_scores, axis=-1), axis=2), axis=2), axis=2)
