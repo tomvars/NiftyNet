@@ -129,7 +129,6 @@ class UniformSampler(ImageWindowDatasetCSV):
         # [enqueue_batch_size, x, y, z, time, modality]
         # where enqueue_batch_size = windows_per_image
         if self.csv_reader is not None:
-            print('Csv reader initialized')
             _, label_dict, _ = self.csv_reader(idx=image_id)
             output_dict.update(label_dict)
 

@@ -354,8 +354,6 @@ class SegmentationApplication(BaseApplication):
                 prediction=class_out,
                 ground_truth=data_dict.get('modality_label', None)
             )
-            print("data_dict.get('modality_label', None)", data_dict.get('modality_label', None))
-            print("class_out", class_out)
             reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
             if self.net_param.decay > 0.0 and reg_losses:
                 reg_loss = tf.reduce_mean(
@@ -366,8 +364,6 @@ class SegmentationApplication(BaseApplication):
             grads = self.optimiser.compute_gradients(
                 loss, colocate_gradients_with_ops=True)
             # collecting gradients variables
-
-            grads = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in grads]# if 'modality_classifier' not in var.name]
             gradients_collector.add_to_collection([grads])
             # collecting output variables
 
