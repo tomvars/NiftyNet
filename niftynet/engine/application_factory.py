@@ -34,6 +34,7 @@ SUPPORTED_APP = {
 SUPPORTED_NETWORK = {
     # CUSTOM
     'multitask_pimms_3d': 'niftynet.contrib.pimms.multitask_pimms_3D.MultitaskPIMMS3D',
+    'singletask_pimms_3d': 'niftynet.contrib.pimms.singletask_pimms_3D.SingletaskPIMMS3D',
     # GAN
     'simulator_gan':
         'niftynet.network.simulator_gan.SimulatorGAN',

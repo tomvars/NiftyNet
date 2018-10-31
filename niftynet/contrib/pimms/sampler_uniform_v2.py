@@ -65,16 +65,22 @@ class UniformSampler(ImageWindowDatasetCSV):
         """
         image_id, data, _ = self.reader(idx=idx, shuffle=True)
         ##### Randomly drop modalities according to params #####
-        modalities_to_drop = int(np.random.choice([0, 1, 2], 1, p=[0.5, 0.3, 0.2]))
+        num_modalities = data['image'].shape[-1]
+        # These probabilities are obtained using
+        # from scipy.stats import t
+        # N, rv = 4, t(0.1)
+        # prob = [(rv.cdf((i+1)/N) - rv.cdf(i/N)) / (rv.cdf(1.0) - 0.5) for i in N]
+        prob_dict = {3: [0.5078, 0.3014, 0.1908], 4: [0.4026, 0.2755, 0.1861, 0.1358]}
+        modalities_to_drop = int(np.random.choice(range(num_modalities), 1, p=prob_dict[num_modalities]))
         data_shape_without_modality = list(data['image'].shape)[:-1]
-        random_indices = np.random.permutation([0, 1, 2])
+        random_indices = np.random.permutation(range(num_modalities))
         dropped_indices = []
         for idx in range(modalities_to_drop):
             idx_to_drop = random_indices[idx]
             data['image'][..., idx_to_drop] = np.zeros(shape=data_shape_without_modality)
             dropped_indices.append(idx_to_drop)
         # Randomly permute the inputs
-        permuted_indices = np.random.permutation([0, 1, 2])
+        permuted_indices = np.random.permutation(range(num_modalities))
         data['image'] = data['image'][..., permuted_indices]
         ########################################################
 

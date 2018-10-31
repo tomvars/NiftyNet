@@ -295,6 +295,7 @@ class SegmentationApplication(BaseApplication):
             b_regularizer = regularizers.l1_regularizer(decay)
 
         self.net = ApplicationNetFactory.create(self.net_param.name)(
+            n_modalities=self.readers[0].shapes['image'][-1],
             num_classes=self.segmentation_param.num_classes,
             w_initializer=InitializerFactory.get_initializer(
                 name=self.net_param.weight_initializer),
@@ -325,7 +326,7 @@ class SegmentationApplication(BaseApplication):
 
             image = tf.cast(data_dict['image'], tf.float32)
             net_args = {'is_training': self.is_training}
-            net_out, brain_parcellation, class_out = self.net(image, **net_args)
+            net_out, class_out = self.net(image, **net_args)
 
             with tf.name_scope('Optimiser'):
                 optimiser_class = OptimiserFactory.create(
@@ -333,15 +334,8 @@ class SegmentationApplication(BaseApplication):
                 self.optimiser = optimiser_class.get_instance(
                     learning_rate=self.action_param.lr)
 
-            ### All the dims in the loss functions
-            tf.logging.info(data_dict.get('label', None))
-            tf.logging.info(data_dict.get('label', None)[..., 0])
-            tf.logging.info(data_dict.get('label', None)[..., 1])
-            tf.logging.info(net_out)
-            tf.logging.info(brain_parcellation)
-
             seg_loss_func = LossFunctionSeg(
-                n_class=2,
+                n_class=self.segmentation_param.num_classes,
                 loss_type=self.action_param.loss_type,
                 softmax=self.segmentation_param.softmax)
 
@@ -350,70 +344,48 @@ class SegmentationApplication(BaseApplication):
                 ground_truth=data_dict.get('label', None)[..., 0],
                 weight_map=data_dict.get('weight', None))
 
-            brain_parcellation_loss_func = LossFunctionSeg(
-                n_class=160,
-                loss_type=self.action_param.loss_type,
-                softmax=self.segmentation_param.softmax)
-
-            brain_parcellation_loss = brain_parcellation_loss_func(
-                prediction=brain_parcellation,
-                ground_truth=data_dict.get('label', None)[..., 1],
-                weight_map=data_dict.get('weight', None))
-
             classification_loss_func = LossFunctionClass(
-                n_class=3,
+                n_class=image.shape.as_list()[-1],
                 loss_type='CrossEntropy',
                 multilabel=False
             )
             modality_classification_loss = classification_loss_func(
-                prediction=tf.reshape(class_out, [-1, 3]),
+                prediction=tf.reshape(class_out, [-1, image.shape.as_list()[-1]]),
                 ground_truth=data_dict.get('modality_label', None)
             )
             reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
             if self.net_param.decay > 0.0 and reg_losses:
                 reg_loss = tf.reduce_mean(
                     [tf.reduce_mean(reg_loss) for reg_loss in reg_losses])
-                loss = seg_loss + brain_parcellation_loss + reg_loss + modality_classification_loss
+                loss = seg_loss + reg_loss + modality_classification_loss
             else:
-                loss = seg_loss + brain_parcellation_loss + modality_classification_loss
+                loss = seg_loss + modality_classification_loss
             grads = self.optimiser.compute_gradients(
                 loss, colocate_gradients_with_ops=True)
             # collecting gradients variables
             gradients_collector.add_to_collection([grads])
             # collecting output variables
 
-            def my_tf_round(x, decimals=0):
-                multiplier = tf.constant(10 ** decimals, dtype=x.dtype)
-                return tf.round(x * multiplier) / multiplier
-
             outputs_collector.add_to_collection(
                 var=current_iter, name='current_iter',
                 average_over_devices=False, collection=NETWORK_OUTPUT)
 
             outputs_collector.add_to_collection(
-                var=my_tf_round(loss, 4), name='loss',
+                var=loss, name='loss',
                 average_over_devices=False, collection=CONSOLE)
 
             outputs_collector.add_to_collection(
-                var=my_tf_round(seg_loss, 4), name='seg_loss',
+                var=seg_loss, name='seg_loss',
                 average_over_devices=False, collection=CONSOLE)
 
             outputs_collector.add_to_collection(
-                var=my_tf_round(brain_parcellation_loss, 4), name='parcellation_loss',
-                average_over_devices=False, collection=CONSOLE)
-
-            outputs_collector.add_to_collection(
-                var=my_tf_round(modality_classification_loss, 4),
+                var=modality_classification_loss,
                 name='modality_classification_loss',
                 average_over_devices=False, collection=CONSOLE)
 
             outputs_collector.add_to_collection(
                 var=class_out, name='class_out',
                 average_over_devices=False, collection=CONSOLE)
-
-            # outputs_collector.add_to_collection(
-            #     var=my_tf_round(reg_loss, 4), name='reg_loss',
-            #     average_over_devices=False, collection=CONSOLE)
 
             outputs_collector.add_to_collection(
                 var=loss, name='loss',
@@ -426,17 +398,14 @@ class SegmentationApplication(BaseApplication):
                 collection=TF_SUMMARIES)
 
             outputs_collector.add_to_collection(
-                var=brain_parcellation_loss, name='brain_parcellation_loss',
-                average_over_devices=True, summary_type='scalar',
-                collection=TF_SUMMARIES)
-
-            outputs_collector.add_to_collection(
                 var=modality_classification_loss, name='modality_classification_loss',
                 average_over_devices=True, summary_type='scalar',
                 collection=TF_SUMMARIES)
 
             # look at only one modality
-            for idx, modality in enumerate(['Flair', 'T1', 'T2']):
+            num_modalities = image.shape.as_list()[-1]
+            dict_of_modality_lists = {3: ['Flair', 'T1', 'T2'], 4: ['T1', 'T1c', 'T2', 'Flair']}
+            for idx, modality in enumerate(dict_of_modality_lists[num_modalities]):
                 outputs_collector.add_to_collection(
                     var=tf.contrib.image.rotate(255.0 * (image[:1, ..., idx] - tf.reduce_min(image[:1, ..., idx])) /
                                                 (tf.reduce_max(image[:1, ..., idx] - tf.reduce_min(image[:1, ..., idx]))),
@@ -444,18 +413,16 @@ class SegmentationApplication(BaseApplication):
                     average_over_devices=True, summary_type='image3_axial',
                     collection=TF_SUMMARIES)
             net_out = tf.argmax(net_out, axis=-1)
-            brain_parcellation = tf.argmax(brain_parcellation, axis=-1)
             outputs_collector.add_to_collection(
-                var=tf.contrib.image.rotate(255 * (net_out[:1, ...]), 3 * math.pi / 2), name='lesion_segmentation',
+                var=tf.contrib.image.rotate(255 * (net_out[:1, ...]), 3 * math.pi / 2), name='segmentation',
+                average_over_devices=True, summary_type='image3_axial',
+                collection=TF_SUMMARIES)
+            label_tensor = data_dict.get('label', None)[:1, ..., 0]
+            outputs_collector.add_to_collection(
+                var=tf.contrib.image.rotate(255 * label_tensor, 3 * math.pi / 2), name='segmentation_gt',
                 average_over_devices=True, summary_type='image3_axial',
                 collection=TF_SUMMARIES)
 
-            outputs_collector.add_to_collection(
-                var=tf.contrib.image.rotate(255 * (brain_parcellation[:1, ...] - tf.reduce_min(brain_parcellation[:1, ...])) / (
-                    tf.reduce_max(brain_parcellation[:1, ...] - tf.reduce_min(brain_parcellation[:1, ...]))),
-                                            3 * math.pi / 2), name='brain_parcellation',
-                average_over_devices=True, summary_type='image3_axial',
-                collection=TF_SUMMARIES)
 
         elif self.is_inference:
             # converting logits into final output for

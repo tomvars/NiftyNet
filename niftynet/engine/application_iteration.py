@@ -4,6 +4,7 @@ Message stores status info of the current iteration.
 """
 import itertools
 import time
+import numpy as np
 
 from niftynet.engine.application_variables import CONSOLE, TF_SUMMARIES
 from niftynet.engine.signal import TRAIN, VALID, INFER
@@ -295,7 +296,7 @@ def _console_vars_to_str(console_dict):
     if not console_dict:
         return ''
     if isinstance(console_dict, dict):
-        console_str = ', '.join('{}={}'.format(key, val)
+        console_str = ', '.join('{}={}'.format(key, np.round(val, 4))
                                 for (key, val) in console_dict.items())
     else:
         console_str = '{}'.format(console_dict)
