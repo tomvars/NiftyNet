@@ -507,6 +507,13 @@ def add_training_args(parser):
         default=())
 
     parser.add_argument(
+        "--antialiasing",
+        help="Indicates if antialiasing must be performed "
+             "when randomly scaling the input images",
+        type=str2boolean,
+        default=True)
+
+    parser.add_argument(
         "--bias_field_range",
         help="[Training only] The range of bias field coeffs in [min_coeff, "
              "max_coeff]",
@@ -535,16 +542,19 @@ def add_training_args(parser):
         help="Enables elastic deformation",
         type=str2boolean,
         default=False)
+
     parser.add_argument(
         "--num_ctrl_points",
         help="Number of control points for the elastic deformation",
         type=int,
         default=4)
+
     parser.add_argument(
         "--deformation_sigma",
         help="The standard deviation for elastic deformation.",
         type=float,
         default=15)
+
     parser.add_argument(
         "--proportion_to_deform",
         help="What fraction of samples to deform elastically.",
@@ -620,6 +630,18 @@ def add_training_args(parser):
         help="Fraction of dataset to use for inference",
         type=float,
         default=0.)
+
+    parser.add_argument(
+        "--do_whole_volume_validation",
+        help="Does validation on entire volumes and aggregates.",
+        type=str2boolean,
+        default=False)
+
+    parser.add_argument(
+        "--save_seg_dir",  # save_whole_volume_dir
+        help="Directory to save whole-volume validation results",
+        type=str,
+        default='./output_whole_validations')
 
     return parser
 

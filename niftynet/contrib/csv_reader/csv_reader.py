@@ -143,7 +143,7 @@ class CSVReader(Layer):
                         subject_id))[0]
                     idx_dict[name] = relevant_indices
 
-        elif idx is None:
+        elif idx is None and subject_id is None:
             idx_dict = {}
             for name in self.names:
                 if subject_id is None:

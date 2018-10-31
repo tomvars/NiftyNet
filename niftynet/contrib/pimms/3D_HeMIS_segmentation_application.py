@@ -6,7 +6,7 @@ from niftynet.engine.application_factory import \
     ApplicationNetFactory, InitializerFactory, OptimiserFactory
 from niftynet.engine.application_variables import \
     CONSOLE, NETWORK_OUTPUT, TF_SUMMARIES
-from niftynet.engine.sampler_grid_v2 import GridSampler
+from niftynet.contrib.csv_reader.sampler_grid_whole_volume_v2_csv import GridSampler
 from niftynet.engine.sampler_resize_v2 import ResizeSampler
 from niftynet.contrib.pimms.sampler_uniform_v2 import UniformSampler
 from niftynet.engine.sampler_weighted_v2 import WeightedSampler
@@ -192,13 +192,29 @@ class SegmentationApplication(BaseApplication):
 
     def initialise_uniform_sampler(self):
         self.sampler = [[UniformSampler(
-            reader=image_reader,
-            csv_reader=csv_reader,
+            reader=self.readers[0],
+            csv_reader=self.csv_readers[0],
             window_sizes=self.data_param,
             batch_size=self.net_param.batch_size,
             windows_per_image=self.action_param.sample_per_volume,
-            queue_length=self.net_param.queue_length) for image_reader, csv_reader in
-            zip(self.readers, self.csv_readers)]]
+            queue_length=self.net_param.queue_length),
+            GridSampler(
+                reader=self.readers[1],
+                csv_reader=self.csv_readers[1],
+                window_sizes=self.data_param,
+                batch_size=self.net_param.batch_size,
+                spatial_window_size=self.action_param.spatial_window_size,
+                window_border=self.action_param.border,
+                smaller_final_batch_mode=self.net_param.smaller_final_batch_mode,
+                queue_length=self.net_param.queue_length
+            ) if self.action_param.do_whole_volume_validation else UniformSampler(
+                reader=self.readers[0],
+                csv_reader=self.csv_readers[0],
+                window_sizes=self.data_param,
+                batch_size=self.net_param.batch_size,
+                windows_per_image=self.action_param.sample_per_volume,
+                queue_length=self.net_param.queue_length)
+        ]]
 
     def initialise_weighted_sampler(self):
         self.sampler = [[WeightedSampler(
@@ -346,12 +362,11 @@ class SegmentationApplication(BaseApplication):
 
             classification_loss_func = LossFunctionClass(
                 n_class=3,
-                loss_type='MultiLabelCrossEntropy',
-                multilabel=True
+                loss_type='CrossEntropy',
+                multilabel=False
             )
-
             modality_classification_loss = classification_loss_func(
-                prediction=class_out,
+                prediction=tf.reshape(class_out, [-1, 3]),
                 ground_truth=data_dict.get('modality_label', None)
             )
             reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
@@ -406,34 +421,56 @@ class SegmentationApplication(BaseApplication):
                 collection=TF_SUMMARIES)
 
             outputs_collector.add_to_collection(
-                var=tf.contrib.image.rotate(image[:, :, :, :, 0], 3 * math.pi / 2), name='T1',
-                average_over_devices=True, summary_type='image3_axial',
+                var=seg_loss, name='seg_loss',
+                average_over_devices=True, summary_type='scalar',
                 collection=TF_SUMMARIES)
+
             outputs_collector.add_to_collection(
-                var=tf.contrib.image.rotate(image[:, :, :, :, 1], 3 * math.pi / 2), name='T2',
+                var=brain_parcellation_loss, name='brain_parcellation_loss',
+                average_over_devices=True, summary_type='scalar',
+                collection=TF_SUMMARIES)
+
+            outputs_collector.add_to_collection(
+                var=modality_classification_loss, name='modality_classification_loss',
+                average_over_devices=True, summary_type='scalar',
+                collection=TF_SUMMARIES)
+
+            # look at only one modality
+            for idx, modality in enumerate(['Flair', 'T1', 'T2']):
+                outputs_collector.add_to_collection(
+                    var=tf.contrib.image.rotate(255.0 * (image[:1, ..., idx] - tf.reduce_min(image[:1, ..., idx])) /
+                                                (tf.reduce_max(image[:1, ..., idx] - tf.reduce_min(image[:1, ..., idx]))),
+                                                3 * math.pi / 2), name=modality,
+                    average_over_devices=True, summary_type='image3_axial',
+                    collection=TF_SUMMARIES)
+            net_out = tf.argmax(net_out, axis=-1)
+            brain_parcellation = tf.argmax(brain_parcellation, axis=-1)
+            outputs_collector.add_to_collection(
+                var=tf.contrib.image.rotate(255 * (net_out[:1, ...]), 3 * math.pi / 2), name='lesion_segmentation',
                 average_over_devices=True, summary_type='image3_axial',
                 collection=TF_SUMMARIES)
 
             outputs_collector.add_to_collection(
-                var=tf.contrib.image.rotate(image[:, :, :, :, 2], 3 * math.pi / 2), name='Flair',
+                var=tf.contrib.image.rotate(255 * (brain_parcellation[:1, ...] - tf.reduce_min(brain_parcellation[:1, ...])) / (
+                    tf.reduce_max(brain_parcellation[:1, ...] - tf.reduce_min(brain_parcellation[:1, ...]))),
+                                            3 * math.pi / 2), name='brain_parcellation',
                 average_over_devices=True, summary_type='image3_axial',
                 collection=TF_SUMMARIES)
 
             outputs_collector.add_to_collection(
-                var=net_out*255, name='net_out',
+                var=tf.contrib.image.rotate(
+                    255 * (data_dict.get('label', None)[..., 1] - tf.reduce_min(data_dict.get('label', None)[..., 1])) /
+                    (tf.reduce_max(data_dict.get('label', None)[..., 1] - tf.reduce_min(data_dict.get('label', None)[..., 1]))),
+                    3 * math.pi / 2), name='brain_parcellation_gt',
                 average_over_devices=True, summary_type='image3_axial',
                 collection=TF_SUMMARIES)
 
             outputs_collector.add_to_collection(
-                var=brain_parcellation, name='brain_parcellation',
+                var=tf.contrib.image.rotate(
+                    255 * (data_dict.get('label', None)[..., 0]),
+                    3 * math.pi / 2), name='lesion_segmentation_gt',
                 average_over_devices=True, summary_type='image3_axial',
                 collection=TF_SUMMARIES)
-
-            # outputs_collector.add_to_collection(
-            #     var=tf.contrib.image.rotate(tf.squeeze(data_dict.get('label', None)[..., 0] * (255.0 / 4.0)), 3 * math.pi / 2),
-            #     name='label',
-            #     average_over_devices=True, summary_type='image3_axial',
-            #     collection=TF_SUMMARIES)
 
         elif self.is_inference:
             # converting logits into final output for
@@ -463,6 +500,7 @@ class SegmentationApplication(BaseApplication):
             outputs_collector.add_to_collection(
                 var=brain_parcellation, name='brain_parcellation',
                 average_over_devices=False, collection=NETWORK_OUTPUT)
+
             outputs_collector.add_to_collection(
                 var=data_dict['image_location'], name='location',
                 average_over_devices=False, collection=NETWORK_OUTPUT)
@@ -511,4 +549,3 @@ class SegmentationApplication(BaseApplication):
         elif iteration_message.is_validation:
             iteration_message.data_feed_dict[self.is_validation] = True
         iteration_message.data_feed_dict[iteration_message.ops_to_run['niftynetout']['current_iter']] = iteration_message.current_iter
-

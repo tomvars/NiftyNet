@@ -46,6 +46,7 @@ class MultitaskPIMMS3D(BaseNet):
         n_ims_per_subj = input_tensor.shape.as_list()[-1]
         n_subj_in_batch = input_tensor.shape.as_list()[0]
         z_size = input_tensor.shape.as_list()[-2]
+        print(input_tensor.shape.as_list())
         tf.logging.info('Input tensor dims: %s' % input_tensor.shape)
         modality_scores = []
         with tf.variable_scope('modality_classifier') as scope:
@@ -56,7 +57,7 @@ class MultitaskPIMMS3D(BaseNet):
             for i in range(n_ims_per_subj):
                 #### Do this conditionally? #####
                 scope.reuse_variables()
-                out = modality_classifier(tf.expand_dims(input_tensor[..., z_size//2, i], -1), True)
+                out = modality_classifier(tf.expand_dims(input_tensor[..., 40, i], -1), True)
                 # out = tf.check_numerics(out, message='Modality classifier outputs NaNs')
                 modality_scores.append(out)
 

@@ -49,6 +49,7 @@ class GridSamplesAggregator(ImageWindowsAggregator):
                 #    save current image and create an empty image
                 self._save_current_image()
                 if self._is_stopping_signal(location[batch_id]):
+                    print('Has finished validating')
                     return False
                 self.image_out = self._initialise_empty_image(
                     image_id=image_id,

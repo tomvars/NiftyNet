@@ -21,7 +21,7 @@ import tensorflow as tf
 
 from niftynet.engine.application_factory import \
     ApplicationFactory, EventHandlerFactory, IteratorFactory
-from niftynet.engine.application_iteration import IterationMessage
+from niftynet.engine.application_iteration import IterationMessage, IterationMessageCreator
 from niftynet.engine.application_variables import \
     GradientsCollector, OutputsCollector
 from niftynet.engine.signal import TRAIN, \
@@ -61,6 +61,7 @@ class ApplicationDriver(object):
         self.final_iter = 0
         self.validation_every_n = -1
         self.validation_max_iter = 1
+        self.do_whole_volume_validation = False
 
         self.data_partitioner = ImageSetsPartitioner()
 
@@ -110,10 +111,15 @@ class ApplicationDriver(object):
             self.max_checkpoints = max(self.max_checkpoints,
                                        train_param.max_checkpoints)
             self.validation_every_n = train_param.validation_every_n
+            self.do_whole_volume_validation = train_param.do_whole_volume_validation
             if self.validation_every_n > 0:
                 self.validation_max_iter = max(self.validation_max_iter,
                                                train_param.validation_max_iter)
+
             action_param = train_param
+            if self.do_whole_volume_validation:
+                action_param.__dict__.update(infer_param.__dict__)
+
         else:  # set inference params.
             assert infer_param, 'inference parameters not specified'
             self.initial_iter = infer_param.inference_iter
@@ -140,14 +146,13 @@ class ApplicationDriver(object):
             data_fractions = (train_param.exclude_fraction_for_validation,
                               train_param.exclude_fraction_for_inference) \
                 if do_new_partition else None
-            print(data_param)
             self.data_partitioner.initialise(
                 data_param=data_param,
                 new_partition=do_new_partition,
                 ratios=data_fractions,
                 data_split_file=system_param.dataset_split_file)
             assert self.data_partitioner.has_validation or \
-                self.validation_every_n <= 0, \
+                   self.validation_every_n <= 0, \
                 'validation_every_n is set to {}, ' \
                 'but train/validation splitting not available.\nPlease ' \
                 'check dataset partition list {} ' \
@@ -164,8 +169,12 @@ class ApplicationDriver(object):
             data_param, app_param, self.data_partitioner)
 
         # make the list of initialised event handler instances.
+        if self.do_whole_volume_validation:
+            self.app.is_whole_volume_validating = True
+
         self.load_event_handlers(
             system_param.event_handler or DEFAULT_EVENT_HANDLERS)
+
         self._generator = IteratorFactory.create(
             system_param.iteration_generator or DEFAULT_ITERATION_GENERATOR)
 
@@ -195,10 +204,15 @@ class ApplicationDriver(object):
 
                 # create a iteration message generator and
                 # iteratively run the graph (the main engine loop)
-                iteration_messages = self._generator(**vars(self))()
+                iter_msg_creator = IterationMessageCreator(initial_iter=self.initial_iter,
+                                                           final_iter=self.final_iter,
+                                                           validation_every_n=self.validation_every_n,
+                                                           validation_max_iter=self.validation_max_iter,
+                                                           is_training_action=self.is_training_action,
+                                                           do_whole_volume_validation=self.do_whole_volume_validation)
                 ApplicationDriver.loop(
                     application=application,
-                    iteration_messages=iteration_messages,
+                    iter_msg_creator=iter_msg_creator,
                     loop_status=loop_status)
 
             except KeyboardInterrupt:
@@ -253,6 +267,8 @@ class ApplicationDriver(object):
             # initialise network, these are connected in
             # the context of multiple gpus
             application.initialise_network()
+            # application.initialise_aggregator()
+
             application.add_validation_flag()
 
             # for data parallelism --
@@ -296,7 +312,7 @@ class ApplicationDriver(object):
 
     @staticmethod
     def loop(application,
-             iteration_messages=(),
+             iter_msg_creator=None,
              loop_status=None):
         """
         Running ``loop_step`` with ``IterationMessage`` instances
@@ -321,17 +337,13 @@ class ApplicationDriver(object):
         :return:
         """
         loop_status = loop_status or {}
-        for iter_msg in iteration_messages:
+        iter_msg = iter_msg_creator.iter_msg_func(application)
+        while not iter_msg.should_stop:
+            iter_msg = iter_msg_creator.iter_msg_func(application)
             loop_status['current_iter'] = iter_msg.current_iter
-
             # run an iteration
             ApplicationDriver.loop_step(application, iter_msg)
-
-            # Checking stopping conditions
-            if iter_msg.should_stop:
-                tf.logging.info('stopping -- event handler: %s.',
-                                iter_msg.should_stop)
-                break
+        tf.logging.info('stopping -- event handler: %s.', iter_msg.should_stop)
         # loop finished without any exception
         loop_status['normal_exit'] = True
 
@@ -354,10 +366,8 @@ class ApplicationDriver(object):
         # passed to the application (and observers) for interpretation.
         sess = tf.get_default_session()
         assert sess, 'method should be called within a TF session context.'
-
         iteration_message.current_iter_output = sess.run(
             iteration_message.ops_to_run,
             feed_dict=iteration_message.data_feed_dict)
-
         # broadcasting event of finishing an iteration
         ITER_FINISHED.send(application, iter_msg=iteration_message)

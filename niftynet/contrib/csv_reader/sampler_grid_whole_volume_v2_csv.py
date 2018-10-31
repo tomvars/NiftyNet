@@ -8,17 +8,19 @@ import numpy as np
 import tensorflow as tf
 
 from niftynet.engine.image_window_dataset import ImageWindowDataset
+from niftynet.contrib.csv_reader.sampler_csv_rows import ImageWindowDatasetCSV
 from niftynet.engine.image_window import N_SPATIAL, LOCATION_FORMAT
 
 
 # pylint: disable=too-many-locals
-class GridSampler(ImageWindowDataset):
+class GridSampler(ImageWindowDatasetCSV):
     """
     This class generators ND image samples with a sliding window.
     """
 
     def __init__(self,
                  reader,
+                 csv_reader,
                  window_sizes,
                  batch_size=1,
                  spatial_window_size=None,
@@ -31,13 +33,14 @@ class GridSampler(ImageWindowDataset):
         # modalities sections
         # this is useful when do inference with a spatial window
         # which is different from the training specifications
-        ImageWindowDataset.__init__(
+        ImageWindowDatasetCSV.__init__(
             self,
+            csv_reader=csv_reader,
             reader=reader,
             window_sizes=spatial_window_size or window_sizes,
             batch_size=batch_size,
             windows_per_image=1,
-            queue_length=1,
+            queue_length=queue_length,
             shuffle=False,
             epoch=1,
             smaller_final_batch_mode=smaller_final_batch_mode,
@@ -114,6 +117,11 @@ class GridSampler(ImageWindowDataset):
                     image_key = name
                     output_dict[coord_key] = coordinates[name][idx:idx+1, ...]
                     output_dict[image_key] = image_window[np.newaxis, ...]
+                    if self.csv_reader is not None:
+                        _, label_dict, _ = self.csv_reader(idx=image_id)
+                        output_dict.update(label_dict)
+                        for name in self.csv_reader.task_param.keys():
+                            output_dict[name + '_location'] = output_dict['image_location']
                 yield output_dict
 
 

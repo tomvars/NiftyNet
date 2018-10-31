@@ -127,7 +127,6 @@ SUPPORTED_LOSS_CLASSIFICATION = {
         'niftynet.layer.loss_classification.multi_label_cross_entropy'
 }
 
-
 SUPPORTED_LOSS_AUTOENCODER = {
     "VariationalLowerBound":
         'niftynet.layer.loss_autoencoder.variational_lower_bound',

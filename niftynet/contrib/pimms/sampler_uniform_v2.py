@@ -134,10 +134,10 @@ class UniformSampler(ImageWindowDatasetCSV):
 
             for name in self.csv_reader.names:
                 output_dict[name + '_location'] = output_dict['image_location']
-        # ###### Update the output_dict with the permuted modalities ######
-        # output_dict['modality_label'] = apply_niftynet_format_to_data(permuted_indices)
-        # output_dict['modality_label_location'] = output_dict['image_location']
-        # #################################################################
+        ###### Update the output_dict with the permuted modalities ######
+        output_dict['modality_label'] = apply_niftynet_format_to_data(permuted_indices.astype(np.float32))
+        output_dict['modality_label_location'] = output_dict['image_location']
+        #################################################################
         return output_dict
 
     def _spatial_coordinates_generator(self,
