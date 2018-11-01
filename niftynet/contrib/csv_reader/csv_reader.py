@@ -61,14 +61,14 @@ class CSVReader(Layer):
                              "Will return csv_reader as None",
                              self.names, list(self.task_param))
             return None
-        self.names = valid_names
+        self.valid_names = valid_names
         self.data_param = data_param
         self._dims = None
         self._indexable_output = {}
         self.file_list = file_list
         self.subject_ids = self.file_list['subject_id'].values
 
-        self._input_sources = dict((name, self.task_param.get(name)) for name in self.names)
+        self._input_sources = dict((name, self.task_param.get(name)) for name in self.valid_names)
         self.df_by_task = {}
         self.dims_by_task = {}
         self.type_by_task = {}
@@ -129,7 +129,7 @@ class CSVReader(Layer):
             if mode == 'single':
                 #  Take the list of idx corresponding to subject id and randomly
                 # sample from there
-                for name in self.names:
+                for name in self.valid_names:
                     relevant_indices = np.where(self.df_by_task[
                         name].index.get_loc(
                         subject_id))[0]
@@ -137,7 +137,7 @@ class CSVReader(Layer):
                     idx_dict[name] = random.choice(relevant_indices)
             else: # mode full i.e. output all the lines corresponding to
                     # subject_id
-                for name in self.names:
+                for name in self.valid_names:
                     relevant_indices = np.where(self.df_by_task[
                         name].index.get_loc(
                         subject_id))[0]
@@ -145,7 +145,7 @@ class CSVReader(Layer):
 
         elif idx is None and subject_id is None:
             idx_dict = {}
-            for name in self.names:
+            for name in self.valid_names:
                 if subject_id is None:
                     idx_dict[name] = np.random.randint(self.df_by_task[
                                                       name].shape[0])
@@ -169,7 +169,7 @@ class CSVReader(Layer):
                     idx_dict[name] = relevant_indices
         else:
             idx_dict = {}
-            for name in self.names:
+            for name in self.valid_names:
                 idx_dict[name] = idx
                 subject_id = self.df_by_task[name].iloc[idx_dict[name]].name
 
@@ -187,9 +187,11 @@ class CSVReader(Layer):
         :return: dict of label shape and label location shape
         """
         self._shapes = {}
-        for name in self.names:
-            self._shapes.update({name: (1, self.dims_by_task[name], 1, 1, 1, 1),
-                        name + '_location': (1, 7)})        
+        name = 'modality_label'
+
+        # for name in self.valid_names:
+        self._shapes.update({name: (1, self.dims_by_task[name], 1, 1, 1, 1),
+                    name + '_location': (1, 7)})
         return self._shapes
     
     @property
@@ -198,9 +200,10 @@ class CSVReader(Layer):
         Infer input data dtypes in TF
         """
         self._dtypes = {}
-        for name in self.names:
-            self._dtypes.update({name: tf.float32,
-                        name + '_location': tf.int32})
+        # for name in self.valid_names:
+        name = 'modality_label'
+        self._dtypes.update({name: tf.float32,
+                    name + '_location': tf.int32})
         return self._dtypes
     
     @property

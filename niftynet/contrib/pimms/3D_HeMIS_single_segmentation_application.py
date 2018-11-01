@@ -210,8 +210,8 @@ class SegmentationApplication(BaseApplication):
                 smaller_final_batch_mode=self.net_param.smaller_final_batch_mode,
                 queue_length=self.net_param.queue_length
             ) if self.action_param.do_whole_volume_validation else UniformSampler(
-                reader=self.readers[0],
-                csv_reader=self.csv_readers[0],
+                reader=self.readers[1],
+                csv_reader=self.csv_readers[1],
                 window_sizes=self.data_param,
                 batch_size=self.net_param.batch_size,
                 windows_per_image=self.action_param.sample_per_volume,
@@ -486,6 +486,27 @@ class SegmentationApplication(BaseApplication):
                                                  outputs_collector=outputs_collector,
                                                  class_out=class_out,
                                                  data_dict=data_dict)
+            if self.action_param.do_whole_volume_validation:
+                output_prob = self.segmentation_param.output_prob
+                num_classes = self.segmentation_param.num_classes
+                if output_prob and num_classes > 1:
+                    post_process_layer = PostProcessingLayer(
+                        'SOFTMAX', num_classes=num_classes)
+                elif not output_prob and num_classes > 1:
+                    post_process_layer = PostProcessingLayer(
+                        'ARGMAX', num_classes=num_classes)
+                else:
+                    post_process_layer = PostProcessingLayer(
+                        'IDENTITY', num_classes=num_classes)
+                net_out_ = post_process_layer(net_out)
+
+                outputs_collector.add_to_collection(
+                    var=net_out_, name='window',
+                    average_over_devices=False, collection=NETWORK_OUTPUT)
+                outputs_collector.add_to_collection(
+                    var=data_dict['image_location'], name='location',
+                    average_over_devices=False, collection=NETWORK_OUTPUT)
+                self.initialise_aggregator()
 
         elif self.is_inference:
             # converting logits into final output for
