@@ -80,6 +80,7 @@ class GridSamplesAggregator(ImageWindowsAggregator):
                 self.image_out, _ = layer.inverse_op(self.image_out)
             if isinstance(layer, DiscreteLabelNormalisationLayer):
                 self.image_out, _ = layer.inverse_op(self.image_out)
+        print(self.image_id)
         subject_name = self.reader.get_subject_id(self.image_id)
         filename = "{}{}.nii.gz".format(subject_name, self.postfix)
         source_image_obj = self.input_image[self.name]

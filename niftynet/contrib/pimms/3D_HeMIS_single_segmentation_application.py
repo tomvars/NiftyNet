@@ -6,7 +6,8 @@ from niftynet.engine.application_factory import \
     ApplicationNetFactory, InitializerFactory, OptimiserFactory
 from niftynet.engine.application_variables import \
     CONSOLE, NETWORK_OUTPUT, TF_SUMMARIES
-from niftynet.contrib.csv_reader.sampler_grid_whole_volume_v2_csv import GridSampler
+from niftynet.contrib.csv_reader.sampler_grid_whole_volume_v2_csv import GridSampler as ValidationGridSampler
+from niftynet.engine.sampler_grid_v2 import GridSampler as GridSampler
 from niftynet.engine.sampler_resize_v2 import ResizeSampler
 from niftynet.contrib.pimms.sampler_uniform_v2 import UniformSampler
 from niftynet.engine.sampler_weighted_v2 import WeightedSampler
@@ -77,6 +78,7 @@ class SegmentationApplication(BaseApplication):
         elif self.is_inference:
             # in the inference process use `image` input only
             reader_names = ('image',)
+            csv_reader_names = ('',)
         elif self.is_evaluation:
             reader_names = ('image', 'label', 'inferred')
         else:
@@ -198,7 +200,7 @@ class SegmentationApplication(BaseApplication):
             batch_size=self.net_param.batch_size,
             windows_per_image=self.action_param.sample_per_volume,
             queue_length=self.net_param.queue_length),
-            GridSampler(
+            ValidationGridSampler(
                 reader=self.readers[1],
                 csv_reader=self.csv_readers[1],
                 window_sizes=self.data_param,
@@ -257,7 +259,7 @@ class SegmentationApplication(BaseApplication):
 
     def initialise_grid_aggregator(self):
         self.output_decoder = GridSamplesAggregator(
-            image_reader=self.readers[0],
+            image_reader=self.readers[0] if self.is_inference else self.readers[1],
             output_path=self.action_param.save_seg_dir,
             window_border=self.action_param.border,
             interp_order=self.action_param.output_interp_order,
@@ -305,6 +307,46 @@ class SegmentationApplication(BaseApplication):
             b_regularizer=b_regularizer,
             acti_func=self.net_param.activation_function)
 
+    def add_confusion_matrix_summaries_(self,
+                                        num_classes,
+                                        outputs_collector,
+                                        class_out,
+                                        data_dict):
+        """ This method defines several monitoring metrics that
+        are derived from the confusion matrix """
+        labels = tf.reshape(tf.cast(data_dict['modality_label'], tf.int64), [-1])
+        prediction = tf.reshape(tf.argmax(class_out, -1), [-1])
+        conf_mat = tf.confusion_matrix(labels, prediction, num_classes)
+        conf_mat = tf.to_float(conf_mat)
+        TP, FP, TN, FN = conf_mat[1][1], conf_mat[0][1], conf_mat[0][0], conf_mat[1][0]
+        if num_classes == 2:
+            outputs_collector.add_to_collection(
+                var=TP, name='true_positives',
+                average_over_devices=True, summary_type='scalar',
+                collection=TF_SUMMARIES)
+            outputs_collector.add_to_collection(
+                var=FN, name='false_negatives',
+                average_over_devices=True, summary_type='scalar',
+                collection=TF_SUMMARIES)
+            outputs_collector.add_to_collection(
+                var=FP, name='false_positives',
+                average_over_devices=True, summary_type='scalar',
+                collection=TF_SUMMARIES)
+            outputs_collector.add_to_collection(
+                var=FN, name='true_negatives',
+                average_over_devices=True, summary_type='scalar',
+                collection=TF_SUMMARIES)
+
+        outputs_collector.add_to_collection(
+            var=(TP + TN) / (TP + FP + TN + FN), name='accuracy',
+            average_over_devices=True, summary_type='scalar',
+            collection=TF_SUMMARIES)
+
+        outputs_collector.add_to_collection(
+            var=(TP + TN) / (TP + FP + TN + FN), name='accuracy',
+            average_over_devices=True, summary_type='scalar',
+            collection=CONSOLE)
+
     def connect_data_and_network(self,
                                  outputs_collector=None,
                                  gradients_collector=None):
@@ -317,6 +359,9 @@ class SegmentationApplication(BaseApplication):
         if self.is_training:
 
             current_iter = tf.placeholder(dtype=tf.float32)
+            outputs_collector.add_to_collection(
+                var=current_iter, name='current_iter',
+                average_over_devices=False, collection=NETWORK_OUTPUT)
             if self.action_param.validation_every_n > 0:
                 data_dict = tf.cond(tf.logical_not(self.is_validation),
                                     lambda: switch_sampler(for_training=True),
@@ -367,16 +412,30 @@ class SegmentationApplication(BaseApplication):
             # collecting output variables
 
             outputs_collector.add_to_collection(
-                var=current_iter, name='current_iter',
-                average_over_devices=False, collection=NETWORK_OUTPUT)
-
-            outputs_collector.add_to_collection(
                 var=loss, name='loss',
                 average_over_devices=False, collection=CONSOLE)
 
             outputs_collector.add_to_collection(
                 var=seg_loss, name='seg_loss',
                 average_over_devices=False, collection=CONSOLE)
+
+            dice_score_func = LossFunctionSeg(
+                n_class=self.segmentation_param.num_classes,
+                loss_type='Dice',
+                softmax=self.segmentation_param.softmax)
+
+            dice_score = dice_score_func(
+                prediction=net_out,
+                ground_truth=data_dict.get('label', None)[..., 0],
+                weight_map=data_dict.get('weight', None))
+
+            outputs_collector.add_to_collection(
+                var=1 - dice_score, name='dice_score',
+                average_over_devices=False, collection=CONSOLE)
+
+            outputs_collector.add_to_collection(
+                var=1 - dice_score, name='dice_score', summary_type='scalar',
+                average_over_devices=False, collection=TF_SUMMARIES)
 
             outputs_collector.add_to_collection(
                 var=modality_classification_loss,
@@ -423,15 +482,23 @@ class SegmentationApplication(BaseApplication):
                 average_over_devices=True, summary_type='image3_axial',
                 collection=TF_SUMMARIES)
 
+            self.add_confusion_matrix_summaries_(num_classes=image.shape.as_list()[-1],
+                                                 outputs_collector=outputs_collector,
+                                                 class_out=class_out,
+                                                 data_dict=data_dict)
 
         elif self.is_inference:
             # converting logits into final output for
             # classification probabilities or argmax classification labels
             data_dict = switch_sampler(for_training=False)
+            current_iter = tf.placeholder(dtype=tf.float32)
+            outputs_collector.add_to_collection(
+                var=current_iter, name='current_iter',
+                average_over_devices=False, collection=NETWORK_OUTPUT)
+
             image = tf.cast(data_dict['image'], tf.float32)
-            net_args = {'is_training': self.is_training,
-                        'keep_prob': self.net_param.keep_prob}
-            net_out, brain_parcellation, class_out = self.net(image, **net_args)
+            net_args = {'is_training': self.is_training}
+            net_out, class_out = self.net(image, **net_args)
 
             output_prob = self.segmentation_param.output_prob
             num_classes = self.segmentation_param.num_classes
@@ -450,22 +517,13 @@ class SegmentationApplication(BaseApplication):
                 var=net_out, name='window',
                 average_over_devices=False, collection=NETWORK_OUTPUT)
             outputs_collector.add_to_collection(
-                var=brain_parcellation, name='brain_parcellation',
-                average_over_devices=False, collection=NETWORK_OUTPUT)
-
-            outputs_collector.add_to_collection(
                 var=data_dict['image_location'], name='location',
                 average_over_devices=False, collection=NETWORK_OUTPUT)
             self.initialise_aggregator()
 
     def interpret_output(self, batch_output):
-        if self.is_inference:
-            self.output_decoder.decode_batch(
-                batch_output['window'], batch_output['location'])
-            self.output_decoder.decode_batch(
-                batch_output['brain_parcellation'], batch_output['location'])
-            return False
-        return True
+        return self.output_decoder.decode_batch(batch_output['window'],
+                                                batch_output['location'])
 
     def initialise_evaluator(self, eval_param):
         self.eval_param = eval_param

@@ -334,6 +334,12 @@ class IterationMessageCreator(object):
         :param loop_counter: How many times the ApplicationDriver.loop method has been called
         :return: an IterationMessage object
         """
+        if not self.is_training_action:
+            # Do inference
+            iter_msg = IterationMessage()
+            # self.current_iter += 1
+            iter_msg.current_iter, iter_msg.phase = self.current_iter, INFER
+            return iter_msg
         if not self.do_whole_volume_validation:
             iter_msg = IterationMessage()
             if self.current_iter > 0 and self.validation_every_n > 0 and \
