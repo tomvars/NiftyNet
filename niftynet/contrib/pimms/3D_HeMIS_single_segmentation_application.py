@@ -32,6 +32,7 @@ from niftynet.layer.rand_rotation import RandomRotationLayer
 from niftynet.layer.rand_spatial_scaling import RandomSpatialScalingLayer
 from niftynet.evaluation.segmentation_evaluator import SegmentationEvaluator
 from niftynet.layer.rand_elastic_deform import RandomElasticDeformationLayer
+from niftynet.engine.windows_aggregator_classifier import ClassifierSamplesAggregator
 
 SUPPORTED_INPUT = set(['image', 'label', 'modality_label', 'weight', 'sampler', 'inferred'])
 
@@ -265,6 +266,11 @@ class SegmentationApplication(BaseApplication):
             interp_order=self.action_param.output_interp_order,
             postfix=self.action_param.output_postfix)
 
+        self.output_decoder_class = ClassifierSamplesAggregator(
+            image_reader=self.readers[0] if self.is_inference else self.readers[1],
+            output_path=self.action_param.save_seg_dir,
+            postfix=self.action_param.output_postfix)
+
     def initialise_resize_aggregator(self):
         self.output_decoder = ResizeSamplesAggregator(
             image_reader=self.readers[0],
@@ -399,12 +405,14 @@ class SegmentationApplication(BaseApplication):
                 ground_truth=data_dict.get('modality_label', None)
             )
             reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+            decay_constant = 1e-4
+            class_loss_multiplier = tf.exp(-decay_constant*tf.cast(current_iter, dtype=tf.float32), name='class_loss_multiplier')
             if self.net_param.decay > 0.0 and reg_losses:
                 reg_loss = tf.reduce_mean(
                     [tf.reduce_mean(reg_loss) for reg_loss in reg_losses])
                 loss = seg_loss + reg_loss + modality_classification_loss
             else:
-                loss = seg_loss + modality_classification_loss
+                loss = seg_loss + (class_loss_multiplier) * modality_classification_loss
             grads = self.optimiser.compute_gradients(
                 loss, colocate_gradients_with_ops=True)
             # collecting gradients variables
@@ -447,6 +455,10 @@ class SegmentationApplication(BaseApplication):
                 average_over_devices=False, collection=CONSOLE)
 
             outputs_collector.add_to_collection(
+                var=data_dict.get('modality_label', None), name='modality_label',
+                average_over_devices=False, collection=CONSOLE)
+
+            outputs_collector.add_to_collection(
                 var=loss, name='loss',
                 average_over_devices=True, summary_type='scalar',
                 collection=TF_SUMMARIES)
@@ -471,9 +483,9 @@ class SegmentationApplication(BaseApplication):
                                                 3 * math.pi / 2), name=modality,
                     average_over_devices=True, summary_type='image3_axial',
                     collection=TF_SUMMARIES)
-            net_out = tf.argmax(net_out, axis=-1)
+            net_out_argmaxed = tf.argmax(net_out, axis=-1)
             outputs_collector.add_to_collection(
-                var=tf.contrib.image.rotate(255 * (net_out[:1, ...]), 3 * math.pi / 2), name='segmentation',
+                var=tf.contrib.image.rotate(255 * (net_out_argmaxed[:1, ...]), 3 * math.pi / 2), name='segmentation',
                 average_over_devices=True, summary_type='image3_axial',
                 collection=TF_SUMMARIES)
             label_tensor = data_dict.get('label', None)[:1, ..., 0]
@@ -498,10 +510,10 @@ class SegmentationApplication(BaseApplication):
                 else:
                     post_process_layer = PostProcessingLayer(
                         'IDENTITY', num_classes=num_classes)
-                net_out_ = post_process_layer(net_out)
+                net_out_output = post_process_layer(net_out)
 
                 outputs_collector.add_to_collection(
-                    var=net_out_, name='window',
+                    var=net_out_output, name='window',
                     average_over_devices=False, collection=NETWORK_OUTPUT)
                 outputs_collector.add_to_collection(
                     var=data_dict['image_location'], name='location',
@@ -540,9 +552,15 @@ class SegmentationApplication(BaseApplication):
             outputs_collector.add_to_collection(
                 var=data_dict['image_location'], name='location',
                 average_over_devices=False, collection=NETWORK_OUTPUT)
+
+            outputs_collector.add_to_collection(
+                var=class_out, name='modality_classification',
+                average_over_devices=False, collection=NETWORK_OUTPUT)
             self.initialise_aggregator()
 
     def interpret_output(self, batch_output):
+        self.output_decoder_class.decode_batch(batch_output['modality_classification'],
+                                               batch_output['location'])
         return self.output_decoder.decode_batch(batch_output['window'],
                                                 batch_output['location'])
 

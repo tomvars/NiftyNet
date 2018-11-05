@@ -223,6 +223,7 @@ class ImageReader(Layer):
         try:
             image_dict = self.output_list[idx]
         except (IndexError, TypeError):
+            tf.logging.info('idx provided {} is not in range of output_list'.format(idx))
             return -1, None, None
 
         image_data_dict = \
