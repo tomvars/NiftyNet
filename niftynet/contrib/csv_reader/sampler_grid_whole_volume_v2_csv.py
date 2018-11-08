@@ -5,7 +5,9 @@ Sampling image by a sliding window.
 from __future__ import absolute_import, division, print_function
 
 import numpy as np
+import scipy.ndimage
 import tensorflow as tf
+from tensorflow.python.data.util import nest
 
 from niftynet.engine.image_window_dataset import ImageWindowDataset
 from niftynet.contrib.csv_reader.sampler_csv_rows import ImageWindowDatasetCSV
@@ -59,7 +61,7 @@ class GridSampler(ImageWindowDatasetCSV):
 
     def layer_op(self):
         while True:
-            image_id, data, _ = self.reader(idx=None, shuffle=False)
+            image_id, data, interp_orders = self.reader(idx=None, shuffle=False)
             if not data:
                 self.reader.reset()
                 self.no_more_samples = True
@@ -123,8 +125,66 @@ class GridSampler(ImageWindowDatasetCSV):
                         name = 'modality_label'
                         # for name in self.csv_reader.task_param.keys():
                         output_dict[name + '_location'] = output_dict['image_location']
+                ################# RESIZING CENTRAL SLICE FOR USE BY MODALITY CLASSIFIER #################
+                name = 'modality_slice'
+                coordinates_key = LOCATION_FORMAT.format(name)
+                image_data_key = name
+                window_shape = (80, 80, 1, 1, 1)
+                output_dict[coordinates_key] = self.dummy_coordinates(
+                    image_id, window_shape, self.window.n_samples).astype(np.int32)
+                image_array = []
+                for _ in range(self.window.n_samples):
+                    # prepare image data
+                    image_shape = tuple(list(data['image'].shape[:2]) + [1, 1, 1])
+                    if image_shape == window_shape or interp_orders['image'][0] < 0:
+                        # already in the same shape
+                        image_window = data['image']
+                    else:
+                        zoom_ratio = [float(p) / float(d) for p, d in zip(window_shape, image_shape)]
+                        image_window = zoom_3d(
+                            image=data['image'][:, :, data['image'].shape[2] // 2, ...][:, :, np.newaxis, ...],
+                            ratio=zoom_ratio,
+                            interp_order=3)
+                    image_array.append(image_window[np.newaxis, ...])
+                if len(image_array) > 1:
+                    output_dict[image_data_key] = \
+                        np.concatenate(image_array, axis=0).astype(np.float32)
+                else:
+                    output_dict[image_data_key] = image_array[0].astype(np.float32)
+                ##########################################################################################
                 yield output_dict
 
+    @property
+    def tf_shapes(self):
+        """
+        returns a dictionary of sampler output tensor shapes
+        """
+        assert self.window, 'Unknown output shapes: self.window not initialised'
+        shape_dict = self.window.tf_shapes
+        if self.csv_reader is not None:
+            shape_dict.update(self.csv_reader.tf_shapes)
+        output_shapes = nest.map_structure_up_to(
+            {'modality_slice': tf.float32,
+             'modality_slice_location': tf.int32},
+            tf.TensorShape,
+            {'modality_slice': (1, 80, 80, 1, 1, 3),
+             'modality_slice_location': (1, 7)}
+        )
+        shape_dict.update(output_shapes)
+        return shape_dict
+
+    @property
+    def tf_dtypes(self):
+        """
+        returns a dictionary of sampler output tensorflow dtypes
+        """
+        assert self.window, 'Unknown output shapes: self.window not initialised'
+        shape_dict = self.window.tf_dtypes
+        if self.csv_reader is not None:
+            shape_dict.update(self.csv_reader.tf_dtypes)
+        shape_dict.update({'modality_slice': tf.float32,
+                           'modality_slice_location': tf.int32})
+        return shape_dict
 
 def grid_spatial_coordinates(subject_id, img_sizes, win_sizes, border_size):
     """
@@ -214,3 +274,50 @@ def _enumerate_step_points(starting, ending, win_size, step_size):
             sampling_point_set, np.round(np.mean(sampling_point_set)))
     _, uniq_idx = np.unique(sampling_point_set, return_index=True)
     return sampling_point_set[np.sort(uniq_idx)]
+
+def zoom_3d(image, ratio, interp_order):
+    """
+    Taking 5D image as input, and zoom each 3D slice independently
+    """
+    assert image.ndim == 5, "input images should be 5D array"
+    output = []
+    for time_pt in range(image.shape[3]):
+        output_mod = []
+        for mod in range(image.shape[4]):
+            zoomed = scipy.ndimage.zoom(
+                image[..., time_pt, mod], ratio[:3], order=interp_order)
+            output_mod.append(zoomed[..., np.newaxis, np.newaxis])
+        output.append(np.concatenate(output_mod, axis=-1))
+    return np.concatenate(output, axis=-2)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

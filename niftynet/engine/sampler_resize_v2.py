@@ -78,7 +78,7 @@ class ResizeSampler(ImageWindowDataset):
             image_data_key = name
 
             output_dict[coordinates_key] = self.dummy_coordinates(
-                image_id, static_window_shapes[name], self.window.n_samples)
+                image_id, static_window_shapes[name], self.window.n_samples).astype(np.int32)
             image_array = []
             for _ in range(self.window.n_samples):
                 # prepare image data

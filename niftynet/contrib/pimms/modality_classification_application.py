@@ -7,7 +7,7 @@ This class is instantiated and initalized by the application_driver.
 """
 
 import os
-
+import math
 import tensorflow as tf
 
 from niftynet.application.base_application import BaseApplication
@@ -16,8 +16,8 @@ from niftynet.engine.application_factory import \
 from niftynet.engine.application_variables import \
     CONSOLE, NETWORK_OUTPUT, TF_SUMMARIES
 from niftynet.contrib.csv_reader.sampler_resize_v2_csv import ResizeSamplerCSV as ResizeSampler
-from niftynet.engine.windows_aggregator_classifier import \
-    ClassifierSamplesAggregator
+# from niftynet.engine.windows_aggregator_classifier import \
+#     ClassifierSamplesAggregator
 from niftynet.io.image_reader import ImageReader
 from niftynet.contrib.csv_reader.csv_reader import CSVReader
 from niftynet.layer.discrete_label_normalisation import \
@@ -33,6 +33,9 @@ from niftynet.layer.rand_flip import RandomFlipLayer
 from niftynet.layer.rand_rotation import RandomRotationLayer
 from niftynet.layer.rand_spatial_scaling import RandomSpatialScalingLayer
 from niftynet.evaluation.classification_evaluator import ClassificationEvaluator
+from niftynet.contrib.pimms.windows_aggregator_classifier import ClassifierSamplesAggregator
+from niftynet.contrib.pimms.resnet_plugin import ResNet
+
 
 SUPPORTED_INPUT = set(['image', 'modality_label', 'sampler', 'inferred'])
 
@@ -70,7 +73,7 @@ class ClassificationApplication(BaseApplication):
 
         self.data_param = data_param
         self.classification_param = task_param
-
+        csv_reader_names = ('',)
         if self.is_training:
             image_reader_names = ('image', 'sampler')
             csv_reader_names = ('modality_label',)
@@ -96,7 +99,7 @@ class ClassificationApplication(BaseApplication):
         self.csv_readers = [
             CSVReader(csv_reader_names).initialise(
                 data_param, task_param, file_list) for file_list in file_lists]
-
+        print(self.csv_readers)
         foreground_masking_layer = BinaryMaskingLayer(
             type_str=self.net_param.foreground_type,
             multimod_fusion=self.net_param.multimod_foreground_type,
@@ -200,7 +203,7 @@ class ClassificationApplication(BaseApplication):
             w_regularizer = regularizers.l1_regularizer(decay)
             b_regularizer = regularizers.l1_regularizer(decay)
 
-        self.net = ApplicationNetFactory.create(self.net_param.name)(
+        self.net = ResNet(
             num_classes=self.classification_param.num_classes,
             w_initializer=InitializerFactory.get_initializer(
                 name=self.net_param.weight_initializer),
@@ -220,35 +223,16 @@ class ClassificationApplication(BaseApplication):
         prediction = tf.reshape(tf.argmax(net_out, -1), [-1])
         num_classes = self.classification_param.num_classes
         conf_mat = tf.confusion_matrix(labels, prediction, num_classes)
-        conf_mat = tf.to_float(conf_mat)
-        if self.classification_param.num_classes == 2:
-            outputs_collector.add_to_collection(
-                var=conf_mat[1][1], name='true_positives',
-                average_over_devices=True, summary_type='scalar',
-                collection=TF_SUMMARIES)
-            outputs_collector.add_to_collection(
-                var=conf_mat[1][0], name='false_negatives',
-                average_over_devices=True, summary_type='scalar',
-                collection=TF_SUMMARIES)
-            outputs_collector.add_to_collection(
-                var=conf_mat[0][1], name='false_positives',
-                average_over_devices=True, summary_type='scalar',
-                collection=TF_SUMMARIES)
-            outputs_collector.add_to_collection(
-                var=conf_mat[0][0], name='true_negatives',
-                average_over_devices=True, summary_type='scalar',
-                collection=TF_SUMMARIES)
-        else:
-            outputs_collector.add_to_collection(
-                var=conf_mat[tf.newaxis, :, :, tf.newaxis],
-                name='confusion_matrix',
-                average_over_devices=True, summary_type='image',
-                collection=TF_SUMMARIES)
-
+        conf_mat = tf.to_float(conf_mat) / float(self.net_param.batch_size)
+        accuracy = tf.trace(conf_mat)
         outputs_collector.add_to_collection(
-            var=tf.trace(conf_mat), name='accuracy',
+                var=accuracy, name='accuracy',
+                average_over_devices=True, summary_type='scalar',
+                collection=TF_SUMMARIES)
+        outputs_collector.add_to_collection(
+            var=accuracy, name='accuracy',
             average_over_devices=True, summary_type='scalar',
-            collection=TF_SUMMARIES)
+            collection=CONSOLE)
 
 
     def connect_data_and_network(self,
@@ -269,8 +253,7 @@ class ClassificationApplication(BaseApplication):
                 data_dict = switch_sampler(for_training=True)
 
             image = tf.cast(data_dict['image'], tf.float32)
-            net_args = {'is_training': self.is_training,
-                        'keep_prob': self.net_param.keep_prob}
+            net_args = {'is_training': self.is_training}
             net_out = self.net(image, **net_args)
 
             with tf.name_scope('Optimiser'):
@@ -302,6 +285,26 @@ class ClassificationApplication(BaseApplication):
             outputs_collector.add_to_collection(
                 var=data_loss, name='data_loss',
                 average_over_devices=True, summary_type='scalar',
+                collection=TF_SUMMARIES)
+            outputs_collector.add_to_collection(
+                var=tf.argmax(net_out, axis=-1), name='net_out',
+                average_over_devices=False,
+                summary_type='scalar',
+                collection=CONSOLE
+            )
+            outputs_collector.add_to_collection(
+                var=tf.squeeze(data_dict.get('modality_label', None)), name='y_true',
+                average_over_devices=False,
+                summary_type='scalar',
+                collection=CONSOLE
+            )
+            mod_slice = data_dict['image'][1:, ...]
+            outputs_collector.add_to_collection(
+                var=tf.contrib.image.rotate(
+                    255.0 * (mod_slice - tf.reduce_min(mod_slice)) /
+                    (tf.reduce_max(mod_slice - tf.reduce_min(mod_slice))),
+                    3 * math.pi / 2), name='sample',
+                average_over_devices=True, summary_type='image',
                 collection=TF_SUMMARIES)
             self.add_confusion_matrix_summaries_(outputs_collector,
                                                  net_out,

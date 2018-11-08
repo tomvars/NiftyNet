@@ -96,6 +96,9 @@ class CSVReader(Layer):
         df = pd.read_csv(csv_data_file, index_col=0, header=None)
         df.index = df.index.map(str)
         if len(set(self.subject_ids) - set(df.index)) > 0:
+            tf.logging.fatal('{} in dataset_split.csv vs'
+                             ' {} in csv file'.format(len(set(self.subject_ids)), len(set(df.index))))
+            tf.logging.fatal('Difference of size {}'.format(len(set(self.subject_ids) - set(df.index))))
             tf.logging.fatal('csv file provided at: {} does not have all the subject_ids'.format(csv_data_file))
             raise Exception
         if to_ohe and len(df.columns) == 1:
@@ -121,6 +124,7 @@ class CSVReader(Layer):
 
     @staticmethod
     def to_categorical(labels, label_names):
+        print('LABEL ORDER IS AS FOLLOWS: {}'.format(label_names))
         return [np.array(list(label_names).index(label)).astype(np.float32) for label in labels]
 
     def layer_op(self, idx=None, subject_id=None, mode='single'):

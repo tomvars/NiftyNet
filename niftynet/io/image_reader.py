@@ -226,8 +226,14 @@ class ImageReader(Layer):
             tf.logging.info('idx provided {} is not in range of output_list'.format(idx))
             return -1, None, None
 
-        image_data_dict = \
-            {field: image.get_data() for (field, image) in image_dict.items()}
+            # image_data_dict = \
+            #     {field: image.get_data() for (field, image) in image_dict.items()}
+        image_data_dict = {}
+        for (field, image) in image_dict.items():
+            try:
+                image_data_dict[field] = image.get_data()
+            except (EOFError, OSError):
+                raise Exception('file could not be loaded from path {}'.format(image._file_path))
         interp_order_dict = \
             {field: image.interp_order for (
                 field, image) in image_dict.items()}
@@ -245,7 +251,7 @@ class ImageReader(Layer):
                 else:
                     layer.randomise(image_data_dict)
 
-                image_data_dict = layer(image_data_dict, interp_order_dict)
+                image_data_dict, sampling_params = layer(image_data_dict, interp_order_dict)
             elif isinstance(layer, Layer):
                 image_data_dict, mask = layer(image_data_dict, mask)
                 # print('%s, %.3f sec'%(layer, -local_time + time.time()))

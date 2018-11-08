@@ -8,6 +8,7 @@ import inspect
 
 import numpy as np
 import tensorflow as tf
+from collections import OrderedDict
 # pylint: disable=no-name-in-module
 from tensorflow.python.data.util import nest
 from tensorflow.python.keras.utils import GeneratorEnqueuer
@@ -292,16 +293,21 @@ class ImageWindowDataset(Layer):
 
         # dataset: map each integer i to n windows sampled from subject i
         def _tf_wrapper(idx):
-            flattened_types = nest.flatten(self.tf_dtypes)
+            dtypes = self.tf_dtypes
+            flattened_types = nest.flatten(dtypes)
             flattened_shapes = nest.flatten(self.tf_shapes)
             flat_values = tf.py_func(
                 func=lambda subject_id: nest.flatten(self(subject_id)),
                 inp=[idx],
                 Tout=flattened_types)
+            print('flattened_shapes', flattened_shapes)
+            print('flattened_types', flattened_types)
+            print('self.tf_dtypes', dtypes)
+            print('flat_values', flat_values)
             for ret_t, shape in zip(flat_values, flattened_shapes):
                 # the actual returned numpy array shapes are not checked
                 ret_t.set_shape(shape)
-            return nest.pack_sequence_as(self.tf_dtypes, flat_values)
+            return nest.pack_sequence_as(dtypes, flat_values)
 
         dataset = dataset.map(_tf_wrapper, num_parallel_calls=self._num_threads)
 

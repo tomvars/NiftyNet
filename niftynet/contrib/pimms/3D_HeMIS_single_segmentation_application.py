@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import tensorflow as tf
 import math
+import numpy as np
 from niftynet.application.base_application import BaseApplication
 from niftynet.engine.application_factory import \
     ApplicationNetFactory, InitializerFactory, OptimiserFactory
@@ -9,7 +10,8 @@ from niftynet.engine.application_variables import \
 from niftynet.contrib.csv_reader.sampler_grid_whole_volume_v2_csv import GridSampler as ValidationGridSampler
 from niftynet.engine.sampler_grid_v2 import GridSampler as GridSampler
 from niftynet.engine.sampler_resize_v2 import ResizeSampler
-from niftynet.contrib.pimms.sampler_uniform_v2 import UniformSampler
+# from niftynet.contrib.pimms.sampler_uniform_v2 import UniformSampler
+from niftynet.contrib.pimms.sampler_uniform_and_resize_v2 import UniformAndResizeSampler as UniformSampler
 from niftynet.engine.sampler_weighted_v2 import WeightedSampler
 from niftynet.engine.sampler_balanced_v2 import BalancedSampler
 from niftynet.engine.windows_aggregator_grid import GridSamplesAggregator
@@ -32,7 +34,7 @@ from niftynet.layer.rand_rotation import RandomRotationLayer
 from niftynet.layer.rand_spatial_scaling import RandomSpatialScalingLayer
 from niftynet.evaluation.segmentation_evaluator import SegmentationEvaluator
 from niftynet.layer.rand_elastic_deform import RandomElasticDeformationLayer
-from niftynet.engine.windows_aggregator_classifier import ClassifierSamplesAggregator
+from niftynet.contrib.pimms.windows_aggregator_classifier import ClassifierSamplesAggregator
 
 SUPPORTED_INPUT = set(['image', 'label', 'modality_label', 'weight', 'sampler', 'inferred'])
 
@@ -269,7 +271,7 @@ class SegmentationApplication(BaseApplication):
         self.output_decoder_class = ClassifierSamplesAggregator(
             image_reader=self.readers[0] if self.is_inference else self.readers[1],
             output_path=self.action_param.save_seg_dir,
-            postfix=self.action_param.output_postfix)
+            postfix='_modality_classifications')
 
     def initialise_resize_aggregator(self):
         self.output_decoder = ResizeSamplesAggregator(
@@ -376,8 +378,9 @@ class SegmentationApplication(BaseApplication):
                 data_dict = switch_sampler(for_training=True)
 
             image = tf.cast(data_dict['image'], tf.float32)
+            modality_slice = tf.cast(data_dict['modality_slice'], tf.float32)
             net_args = {'is_training': self.is_training}
-            net_out, class_out = self.net(image, **net_args)
+            net_out, class_out = self.net(image, modality_slice, **net_args)
 
             with tf.name_scope('Optimiser'):
                 optimiser_class = OptimiserFactory.create(
@@ -410,7 +413,7 @@ class SegmentationApplication(BaseApplication):
             if self.net_param.decay > 0.0 and reg_losses:
                 reg_loss = tf.reduce_mean(
                     [tf.reduce_mean(reg_loss) for reg_loss in reg_losses])
-                loss = seg_loss + reg_loss + modality_classification_loss
+                loss = seg_loss + reg_loss + (class_loss_multiplier) * modality_classification_loss
             else:
                 loss = seg_loss + (class_loss_multiplier) * modality_classification_loss
             grads = self.optimiser.compute_gradients(
@@ -483,6 +486,14 @@ class SegmentationApplication(BaseApplication):
                                                 3 * math.pi / 2), name=modality,
                     average_over_devices=True, summary_type='image3_axial',
                     collection=TF_SUMMARIES)
+                mod_slice = tf.expand_dims(data_dict['modality_slice'][:1, ..., idx], axis=-1)
+                outputs_collector.add_to_collection(
+                    var=tf.contrib.image.rotate(
+                        255.0 * (mod_slice - tf.reduce_min(mod_slice)) /
+                        (tf.reduce_max(mod_slice - tf.reduce_min(mod_slice))),
+                        3 * math.pi / 2), name=modality + '_slice',
+                    average_over_devices=True, summary_type='image',
+                    collection=TF_SUMMARIES)
             net_out_argmaxed = tf.argmax(net_out, axis=-1)
             outputs_collector.add_to_collection(
                 var=tf.contrib.image.rotate(255 * (net_out_argmaxed[:1, ...]), 3 * math.pi / 2), name='segmentation',
@@ -517,6 +528,9 @@ class SegmentationApplication(BaseApplication):
                     average_over_devices=False, collection=NETWORK_OUTPUT)
                 outputs_collector.add_to_collection(
                     var=data_dict['image_location'], name='location',
+                    average_over_devices=False, collection=NETWORK_OUTPUT)
+                outputs_collector.add_to_collection(
+                    var=class_out, name='modality_classification',
                     average_over_devices=False, collection=NETWORK_OUTPUT)
                 self.initialise_aggregator()
 
@@ -559,8 +573,13 @@ class SegmentationApplication(BaseApplication):
             self.initialise_aggregator()
 
     def interpret_output(self, batch_output):
-        self.output_decoder_class.decode_batch(batch_output['modality_classification'],
-                                               batch_output['location'])
+        print('Old shape of mod_output', batch_output['modality_classification'].shape)
+        print('Old shape of batch_location', batch_output['location'].shape)
+        mod_output = np.swapaxes(batch_output['modality_classification'], -2, 0)
+        batch_location = np.tile(batch_output['location'], (mod_output.shape[0], 1))
+        print('New shape of mod_output', mod_output.shape)
+        print('New shape of batch_location', batch_location.shape)
+        self.output_decoder_class.decode_batch(mod_output, batch_location)
         return self.output_decoder.decode_batch(batch_output['window'],
                                                 batch_output['location'])
 

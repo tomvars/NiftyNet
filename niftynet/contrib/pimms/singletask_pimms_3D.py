@@ -43,7 +43,7 @@ class SingletaskPIMMS3D(BaseNet):
         self.num_classes = num_classes
         self.n_modalities = n_modalities
 
-    def layer_op(self, input_tensor, is_training, outputs_collector=None):
+    def layer_op(self, input_tensor, modality_slice, is_training, outputs_collector=None):
         n_modalities = self.n_modalities
         n_ims_per_subj = input_tensor.shape.as_list()[-1]
         n_subj_in_batch = input_tensor.shape.as_list()[0]
@@ -59,7 +59,8 @@ class SingletaskPIMMS3D(BaseNet):
             for i in range(n_ims_per_subj):
                 #### Do this conditionally? #####
                 scope.reuse_variables()
-                out = modality_classifier(tf.expand_dims(input_tensor[..., 40, i], -1), True)
+                print(modality_slice.shape)
+                out = modality_classifier(tf.expand_dims(modality_slice[..., i], -1), True)
                 # out = tf.check_numerics(out, message='Modality classifier outputs NaNs')
                 modality_scores.append(out)
 
