@@ -19,7 +19,7 @@ class BNLayer(TrainableLayer):
 
     def __init__(self,
                  regularizer=None,
-                 moving_decay=0.9,
+                 moving_decay=0.99,
                  eps=1e-5,
                  name='batch_norm'):
         super(BNLayer, self).__init__(name=name)
