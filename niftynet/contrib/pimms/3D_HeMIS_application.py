@@ -7,13 +7,11 @@ from niftynet.engine.application_factory import \
     ApplicationNetFactory, InitializerFactory, OptimiserFactory
 from niftynet.engine.application_variables import \
     CONSOLE, NETWORK_OUTPUT, TF_SUMMARIES
-from niftynet.contrib.csv_reader.sampler_grid_whole_volume_v2_csv import GridSampler as ValidationGridSampler
-from niftynet.engine.sampler_grid_v2 import GridSampler as GridSampler
+# from niftynet.contrib.csv_reader.sampler_grid_whole_volume_v2_csv import GridSampler as ValidationGridSampler
+from niftynet.contrib.pimms.sampler_grid_v2 import GridSampler
 from niftynet.engine.sampler_resize_v2 import ResizeSampler
-# from niftynet.contrib.pimms.sampler_uniform_v2 import UniformSampler
-from niftynet.contrib.pimms.sampler_uniform_and_resize_v2 import UniformAndResizeSampler as UniformSampler
-from niftynet.contrib.pimms.sampler_weighted_and_resize_v2 import WeightedAndResizeSampler as WeightedSampler
-# from niftynet.engine.sampler_weighted_v2 import WeightedSampler
+from niftynet.contrib.pimms.sampler_uniform_v2 import UniformSampler
+from niftynet.engine.sampler_weighted_v2 import WeightedSampler
 from niftynet.engine.sampler_balanced_v2 import BalancedSampler
 from niftynet.engine.windows_aggregator_grid import GridSamplesAggregator
 from niftynet.engine.windows_aggregator_resize import ResizeSamplesAggregator
@@ -25,7 +23,6 @@ from niftynet.layer.discrete_label_normalisation import \
 from niftynet.layer.histogram_normalisation import \
     HistogramNormalisationLayer
 from niftynet.layer.loss_segmentation import LossFunction as LossFunctionSeg
-from niftynet.layer.loss_classification import LossFunction as LossFunctionClass
 from niftynet.layer.mean_variance_normalisation import \
     MeanVarNormalisationLayer
 from niftynet.layer.pad import PadLayer
@@ -36,8 +33,9 @@ from niftynet.layer.rand_spatial_scaling import RandomSpatialScalingLayer
 from niftynet.evaluation.segmentation_evaluator import SegmentationEvaluator
 from niftynet.layer.rand_elastic_deform import RandomElasticDeformationLayer
 from niftynet.contrib.pimms.windows_aggregator_classifier import ClassifierSamplesAggregator
+from niftynet.contrib.pimms.singletask_hemis_3D import SingletaskHeMIS3D
 
-SUPPORTED_INPUT = set(['image', 'label', 'modality_label', 'weight', 'sampler', 'inferred'])
+SUPPORTED_INPUT = set(['image', 'label', 'weight', 'sampler', 'inferred'])
 
 
 class SegmentationApplication(BaseApplication):
@@ -77,7 +75,7 @@ class SegmentationApplication(BaseApplication):
         # initialise input image readers
         if self.is_training:
             reader_names = ('image', 'label', 'weight', 'sampler')
-            csv_reader_names = ('modality_label',)
+            csv_reader_names = ('',)
             # csv_reader_names = ('',)
         elif self.is_inference:
             # in the inference process use `image` input only
@@ -204,7 +202,7 @@ class SegmentationApplication(BaseApplication):
             batch_size=self.net_param.batch_size,
             windows_per_image=self.action_param.sample_per_volume,
             queue_length=self.net_param.queue_length),
-            ValidationGridSampler(
+            GridSampler(
                 reader=self.readers[1],
                 csv_reader=self.csv_readers[1],
                 window_sizes=self.data_param,
@@ -224,29 +222,12 @@ class SegmentationApplication(BaseApplication):
 
     def initialise_weighted_sampler(self):
         self.sampler = [[WeightedSampler(
-            reader=self.readers[0],
-            csv_reader=self.csv_readers[0],
+            reader=reader,
             window_sizes=self.data_param,
             batch_size=self.net_param.batch_size,
             windows_per_image=self.action_param.sample_per_volume,
-            queue_length=self.net_param.queue_length),
-            ValidationGridSampler(
-                reader=self.readers[1],
-                csv_reader=self.csv_readers[1],
-                window_sizes=self.data_param,
-                batch_size=self.net_param.batch_size,
-                spatial_window_size=self.action_param.spatial_window_size,
-                window_border=self.action_param.border,
-                smaller_final_batch_mode=self.net_param.smaller_final_batch_mode,
-                queue_length=self.net_param.queue_length
-            ) if self.action_param.do_whole_volume_validation else WeightedSampler(
-                reader=self.readers[1],
-                csv_reader=self.csv_readers[1],
-                window_sizes=self.data_param,
-                batch_size=self.net_param.batch_size,
-                windows_per_image=self.action_param.sample_per_volume,
-                queue_length=self.net_param.queue_length)
-        ]]
+            queue_length=self.net_param.queue_length) for reader in
+            self.readers]]
 
     def initialise_resize_sampler(self):
         self.sampler = [[ResizeSampler(
@@ -259,25 +240,15 @@ class SegmentationApplication(BaseApplication):
             self.readers]]
 
     def initialise_grid_sampler(self):
-        self.sampler = [[ValidationGridSampler(
-                reader=reader,
-                csv_reader=csv_reader,
-                window_sizes=self.data_param,
-                batch_size=self.net_param.batch_size,
-                spatial_window_size=self.action_param.spatial_window_size,
-                window_border=self.action_param.border,
-                smaller_final_batch_mode=self.net_param.smaller_final_batch_mode,
-                queue_length=self.net_param.queue_length
-            ) for reader, csv_reader in zip(self.readers, self.csv_readers)]]
-#        self.sampler = [[GridSampler(
-#            reader=reader,
-#            window_sizes=self.data_param,
-#            batch_size=self.net_param.batch_size,
-#            spatial_window_size=self.action_param.spatial_window_size,
-#            window_border=self.action_param.border,
-#            smaller_final_batch_mode=self.net_param.smaller_final_batch_mode,
-#            queue_length=self.net_param.queue_length) for reader in
-#            self.readers]]
+        self.sampler = [[GridSampler(
+            reader=reader,
+            window_sizes=self.data_param,
+            batch_size=self.net_param.batch_size,
+            spatial_window_size=self.action_param.spatial_window_size,
+            window_border=self.action_param.border,
+            smaller_final_batch_mode=self.net_param.smaller_final_batch_mode,
+            queue_length=self.net_param.queue_length) for reader in
+            self.readers]]
 
     def initialise_balanced_sampler(self):
         self.sampler = [[BalancedSampler(
@@ -332,7 +303,7 @@ class SegmentationApplication(BaseApplication):
             w_regularizer = regularizers.l1_regularizer(decay)
             b_regularizer = regularizers.l1_regularizer(decay)
 
-        self.net = ApplicationNetFactory.create(self.net_param.name)(
+        self.net = SingletaskHeMIS3D(
             n_modalities=self.readers[0].shapes['image'][-1],
             num_classes=self.segmentation_param.num_classes,
             w_initializer=InitializerFactory.get_initializer(
@@ -343,38 +314,6 @@ class SegmentationApplication(BaseApplication):
             b_regularizer=b_regularizer,
             acti_func=self.net_param.activation_function)
 
-    def add_confusion_matrix_summaries_(self,
-                                        num_classes,
-                                        outputs_collector,
-                                        class_out,
-                                        data_dict):
-        """ This method defines several monitoring metrics that
-        are derived from the confusion matrix """
-        labels = tf.reshape(tf.cast(data_dict['modality_label'], tf.int64), [-1])
-        prediction = tf.reshape(tf.argmax(class_out, -1), [-1])
-        conf_mat = tf.confusion_matrix(labels, prediction, num_classes)
-        accuracy = tf.trace(conf_mat) / tf.reduce_sum(tf.reshape(conf_mat, [-1]))
-        output_conf_mat = tf.expand_dims(tf.expand_dims(tf.cast(conf_mat, tf.float32), axis=-1), axis=0)
-        outputs_collector.add_to_collection(
-            var=accuracy, name='accuracy',
-            average_over_devices=True, summary_type='scalar',
-            collection=CONSOLE)
-        outputs_collector.add_to_collection(
-            var=accuracy, name='accuracy',
-            average_over_devices=True, summary_type='scalar',
-            collection=TF_SUMMARIES)
-        outputs_collector.add_to_collection(
-            var=output_conf_mat, name='conf_mat',
-            average_over_devices=True, summary_type='image',
-            collection=TF_SUMMARIES)
-        outputs_collector.add_to_collection(
-            var=labels, name='labels',
-            average_over_devices=True, summary_type='scalar',
-            collection=CONSOLE)
-        outputs_collector.add_to_collection(
-            var=prediction, name='predictions',
-            average_over_devices=True, summary_type='scalar',
-            collection=CONSOLE)
 
     def connect_data_and_network(self,
                                  outputs_collector=None,
@@ -386,11 +325,6 @@ class SegmentationApplication(BaseApplication):
                 return sampler.pop_batch_op()
 
         if self.is_training:
-
-            current_iter = tf.placeholder(dtype=tf.float32)
-            outputs_collector.add_to_collection(
-                var=current_iter, name='current_iter',
-                average_over_devices=False, collection=NETWORK_OUTPUT)
             if self.action_param.validation_every_n > 0:
                 data_dict = tf.cond(tf.logical_not(self.is_validation),
                                     lambda: switch_sampler(for_training=True),
@@ -399,9 +333,8 @@ class SegmentationApplication(BaseApplication):
                 data_dict = switch_sampler(for_training=True)
 
             image = tf.cast(data_dict['image'], tf.float32)
-            modality_slice = tf.cast(data_dict['modality_slice'], tf.float32)
             net_args = {'is_training': self.is_training}
-            net_out, class_out = self.net(image, modality_slice, **net_args)
+            net_out, class_out = self.net(image, **net_args)
 
             with tf.name_scope('Optimiser'):
                 optimiser_class = OptimiserFactory.create(
@@ -419,24 +352,13 @@ class SegmentationApplication(BaseApplication):
                 ground_truth=data_dict.get('label', None)[..., 0],
                 weight_map=data_dict.get('weight', None))
 
-            classification_loss_func = LossFunctionClass(
-                n_class=image.shape.as_list()[-1],
-                loss_type='CrossEntropy',
-                multilabel=False
-            )
-            modality_classification_loss = classification_loss_func(
-                prediction=tf.reshape(class_out, [-1, image.shape.as_list()[-1]]),
-                ground_truth=data_dict.get('modality_label', None)
-            )
             reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
-            decay_constant = 1e-4
-            class_loss_multiplier = tf.exp(-decay_constant*tf.cast(current_iter, dtype=tf.float32), name='class_loss_multiplier')
             if self.net_param.decay > 0.0 and reg_losses:
                 reg_loss = tf.reduce_mean(
                     [tf.reduce_mean(reg_loss) for reg_loss in reg_losses])
-                loss = seg_loss + reg_loss + class_loss_multiplier * modality_classification_loss * 100
+                loss = seg_loss + reg_loss
             else:
-                loss = seg_loss + class_loss_multiplier * modality_classification_loss * 1000
+                loss = seg_loss
             grads = self.optimiser.compute_gradients(
                 loss, colocate_gradients_with_ops=True)
             # collecting gradients variables
@@ -470,17 +392,8 @@ class SegmentationApplication(BaseApplication):
                 average_over_devices=False, collection=TF_SUMMARIES)
 
             outputs_collector.add_to_collection(
-                var=modality_classification_loss,
-                name='modality_classification_loss',
+                var=class_out, name='class_out',
                 average_over_devices=False, collection=CONSOLE)
-
-            # outputs_collector.add_to_collection(
-            #     var=class_out, name='class_out',
-            #     average_over_devices=False, collection=CONSOLE)
-            #
-            # outputs_collector.add_to_collection(
-            #     var=data_dict.get('modality_label', None), name='modality_label',
-            #     average_over_devices=False, collection=CONSOLE)
 
             outputs_collector.add_to_collection(
                 var=loss, name='loss',
@@ -492,11 +405,6 @@ class SegmentationApplication(BaseApplication):
                 average_over_devices=True, summary_type='scalar',
                 collection=TF_SUMMARIES)
 
-            outputs_collector.add_to_collection(
-                var=modality_classification_loss, name='modality_classification_loss',
-                average_over_devices=True, summary_type='scalar',
-                collection=TF_SUMMARIES)
-
             # look at only one modality
             num_modalities = image.shape.as_list()[-1]
             dict_of_modality_lists = {3: ['Flair', 'T1', 'T2'], 4: ['T1', 'T1c', 'T2', 'Flair']}
@@ -505,31 +413,19 @@ class SegmentationApplication(BaseApplication):
                     var=tf.contrib.image.rotate(255.0 * (image[:1, ..., idx] - tf.reduce_min(image[:1, ..., idx])) /
                                                 (tf.reduce_max(image[:1, ..., idx] - tf.reduce_min(image[:1, ..., idx]))),
                                                 3 * math.pi / 2), name=modality,
-                    average_over_devices=True, summary_type='image3_axial',
-                    collection=TF_SUMMARIES)
-                mod_slice = data_dict['modality_slice'][:1, ..., idx]
-                outputs_collector.add_to_collection(
-                    var=tf.contrib.image.rotate(
-                        255.0 * (mod_slice - tf.reduce_min(mod_slice)) /
-                        (tf.reduce_max(mod_slice - tf.reduce_min(mod_slice))),
-                        3 * math.pi / 2), name=modality + '_slice',
-                    average_over_devices=True, summary_type='image3_axial',
+                    average_over_devices=False, summary_type='image3_axial',
                     collection=TF_SUMMARIES)
             net_out_argmaxed = tf.argmax(net_out, axis=-1)
             outputs_collector.add_to_collection(
                 var=tf.contrib.image.rotate(255 * (net_out_argmaxed[:1, ...]), 3 * math.pi / 2), name='segmentation',
-                average_over_devices=True, summary_type='image3_axial',
+                average_over_devices=False, summary_type='image3_axial',
                 collection=TF_SUMMARIES)
             label_tensor = data_dict.get('label', None)[:1, ..., 0]
             outputs_collector.add_to_collection(
                 var=tf.contrib.image.rotate(255 * label_tensor, 3 * math.pi / 2), name='segmentation_gt',
-                average_over_devices=True, summary_type='image3_axial',
+                average_over_devices=False, summary_type='image3_axial',
                 collection=TF_SUMMARIES)
 
-            self.add_confusion_matrix_summaries_(num_classes=image.shape.as_list()[-1],
-                                                 outputs_collector=outputs_collector,
-                                                 class_out=class_out,
-                                                 data_dict=data_dict)
             if self.action_param.do_whole_volume_validation:
                 output_prob = self.segmentation_param.output_prob
                 num_classes = self.segmentation_param.num_classes
@@ -559,15 +455,11 @@ class SegmentationApplication(BaseApplication):
             # converting logits into final output for
             # classification probabilities or argmax classification labels
             data_dict = switch_sampler(for_training=False)
-            current_iter = tf.placeholder(dtype=tf.float32)
-            outputs_collector.add_to_collection(
-                var=current_iter, name='current_iter',
-                average_over_devices=False, collection=NETWORK_OUTPUT)
 
             image = tf.cast(data_dict['image'], tf.float32)
-            modality_slice = tf.cast(data_dict['modality_slice'], tf.float32)
-            net_args = {'is_training': self.is_training}
-            net_out, class_out = self.net(image, modality_slice, **net_args)
+            # net_args = {'is_training': self.is_training}
+            net_args = {'is_training': True}
+            net_out, class_out = self.net(image, **net_args)
 
             output_prob = self.segmentation_param.output_prob
             num_classes = self.segmentation_param.num_classes
@@ -595,13 +487,6 @@ class SegmentationApplication(BaseApplication):
             self.initialise_aggregator()
 
     def interpret_output(self, batch_output):
-        print('Old shape of mod_output', batch_output['modality_classification'].shape)
-        print('Old shape of batch_location', batch_output['location'].shape)
-        mod_output = np.swapaxes(batch_output['modality_classification'], -2, 0)
-        batch_location = np.tile(batch_output['location'], (mod_output.shape[0], 1))
-        print('New shape of mod_output', mod_output.shape)
-        print('New shape of batch_location', batch_location.shape)
-        self.output_decoder_class.decode_batch(mod_output, batch_location)
         return self.output_decoder.decode_batch(batch_output['window'],
                                                 batch_output['location'])
 
@@ -638,4 +523,3 @@ class SegmentationApplication(BaseApplication):
             iteration_message.data_feed_dict[self.is_validation] = False
         elif iteration_message.is_validation:
             iteration_message.data_feed_dict[self.is_validation] = True
-        iteration_message.data_feed_dict[iteration_message.ops_to_run['niftynetout']['current_iter']] = iteration_message.current_iter

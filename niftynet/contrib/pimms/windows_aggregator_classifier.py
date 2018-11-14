@@ -50,7 +50,7 @@ class ClassifierSamplesAggregator(ImageWindowsAggregator):
     def _save_current_image(self, image_out, location):
         if self.input_image is None:
             return
-        window_shape = [1, 1, 1, 1, image_out.shape[-1]]
+        window_shape = [1, 1, 1, 1, image_out.shape[-1]*image_out.shape[0]]
         image_out = np.reshape(image_out, window_shape)
         subject_name = self.reader.get_subject_id(self.image_id)
         with open(self.csv_path, 'a') as csv_file:

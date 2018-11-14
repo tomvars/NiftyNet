@@ -7,7 +7,10 @@ input image.
 from __future__ import absolute_import, division, print_function
 
 import numpy as np
+from collections import OrderedDict
+import scipy.ndimage
 import tensorflow as tf
+from tensorflow.python.data.util import nest
 
 from niftynet.engine.image_window_dataset import ImageWindowDataset
 from niftynet.contrib.csv_reader.sampler_csv_rows import ImageWindowDatasetCSV
@@ -15,7 +18,7 @@ from niftynet.contrib.csv_reader.csv_reader import apply_niftynet_format_to_data
 from niftynet.engine.image_window import N_SPATIAL, LOCATION_FORMAT
 
 
-class UniformSampler(ImageWindowDatasetCSV):
+class WeightedAndResizeSampler(ImageWindowDatasetCSV):
     """
     This class generates samples by uniformly sampling each input volume
     currently the coordinates are randomised for spatial dims only,
@@ -32,7 +35,7 @@ class UniformSampler(ImageWindowDatasetCSV):
                  batch_size=1,
                  windows_per_image=1,
                  queue_length=10,
-                 name='uniform_sampler_v2'):
+                 name='weighted_sampler_v2'):
         ImageWindowDatasetCSV.__init__(
             self,
             reader=reader,
@@ -47,7 +50,7 @@ class UniformSampler(ImageWindowDatasetCSV):
             name=name)
 
         tf.logging.info("initialised uniform sampler %s ", self.window.shapes)
-        self.window_centers_sampler = rand_spatial_coordinates
+        self.window_centers_sampler = weighted_spatial_coordinates
 
     # pylint: disable=too-many-locals
     def layer_op(self, idx=None):
@@ -63,7 +66,7 @@ class UniformSampler(ImageWindowDatasetCSV):
         :return: output data dictionary
             ``{image_modality: data_array, image_location: n_samples * 7}``
         """
-        image_id, data, _ = self.reader(idx=idx, shuffle=True)
+        image_id, data, interp_orders = self.reader(idx=idx, shuffle=True)
         ##### Randomly drop modalities according to params #####
         num_modalities = data['image'].shape[-1]
         # These probabilities are obtained using
@@ -83,12 +86,14 @@ class UniformSampler(ImageWindowDatasetCSV):
         permuted_indices = np.random.permutation(range(num_modalities))
         data['image'] = data['image'][..., permuted_indices]
         ########################################################
-
+        # initialise output dict, placeholders as dictionary keys
+        # this dictionary will be used in
+        # enqueue operation in the form of: `feed_dict=output_dict`
+        output_dict = {}
+        # find random coordinates based on window and image shapes
         image_shapes = dict(
             (name, data[name].shape) for name in self.window.names)
         static_window_shapes = self.window.match_image_shapes(image_shapes)
-
-        # find random coordinates based on window and image shapes
         coordinates = self._spatial_coordinates_generator(
             subject_id=image_id,
             data=data,
@@ -96,10 +101,6 @@ class UniformSampler(ImageWindowDatasetCSV):
             win_sizes=static_window_shapes,
             n_samples=self.window.n_samples)
 
-        # initialise output dict, placeholders as dictionary keys
-        # this dictionary will be used in
-        # enqueue operation in the form of: `feed_dict=output_dict`
-        output_dict = {}
         # fill output dict with data
         for name in list(data):
             coordinates_key = LOCATION_FORMAT.format(name)
@@ -116,7 +117,7 @@ class UniformSampler(ImageWindowDatasetCSV):
                     location_array[window_id, 1:]
                 try:
                     image_window = data[name][
-                        x_start:x_end, y_start:y_end, z_start:z_end, ...]
+                                   x_start:x_end, y_start:y_end, z_start:z_end, ...]
                     image_array.append(image_window[np.newaxis, ...])
                 except ValueError:
                     tf.logging.fatal(
@@ -140,10 +141,41 @@ class UniformSampler(ImageWindowDatasetCSV):
 
             for name in self.csv_reader.names:
                 output_dict[name + '_location'] = output_dict['image_location']
-            ###### Update the output_dict with the permuted modalities ######
-            output_dict['modality_label'] = apply_niftynet_format_to_data(permuted_indices.astype(np.float32))
-            output_dict['modality_label_location'] = output_dict['image_location']
-            #################################################################
+        ###### Update the output_dict with the permuted modalities ######
+        output_dict['modality_label'] = np.repeat(apply_niftynet_format_to_data(permuted_indices.astype(np.float32)), 10, axis=1)
+        output_dict['modality_label_location'] = output_dict['image_location']
+        #################################################################
+
+        ################# RESIZING CENTRAL SLICE FOR USE BY MODALITY CLASSIFIER #################
+        name = 'modality_slice'
+        coordinates_key = LOCATION_FORMAT.format(name)
+        image_data_key = name
+        window_shape = (80, 80, 10, 1, 1)
+        output_dict[coordinates_key] = self.dummy_coordinates(
+            image_id, window_shape, self.window.n_samples).astype(np.int32)
+        image_array = []
+        for _ in range(self.window.n_samples):
+            # prepare image data
+            image_shape = tuple(list(data['image'].shape[:3]) + [1, 1])
+            if image_shape == window_shape or interp_orders['image'][0] < 0:
+                # already in the same shape
+                image_window = data['image']
+            else:
+                zoom_ratio = [float(p) / float(d) for p, d in zip(window_shape, image_shape)]
+                image_window = zoom_3d(
+                    # image=data['image'][:, :, central_slice - 5 , ...][:, :, np.newaxis, ...],
+                    image=data['image'],
+                    ratio=zoom_ratio,
+                    interp_order=3)
+            image_array.append(image_window[np.newaxis, ...])
+        if len(image_array) > 1:
+            output_dict[image_data_key] = \
+                np.concatenate(image_array, axis=0).astype(np.float32)
+        else:
+            output_dict[image_data_key] = image_array[0].astype(np.float32)
+        # print('output_shape in weighted sampler', output_dict[image_data_key].shape)
+        ##########################################################################################
+
         return output_dict
 
     def _spatial_coordinates_generator(self,
@@ -214,54 +246,140 @@ class UniformSampler(ImageWindowDatasetCSV):
 
         return all_coordinates
 
-    # @property
-    # def shapes(self):
-    #     """
-    #     returns a dictionary of sampler output tensor shapes
-    #     """
-    #     assert self.window, 'Unknown output shapes: self.window not initialised'
-    #     shape_dict = self.window.tf_shapes
-    #     print(shape_dict)
-    #     shape_dict.update({'modality_label': (1, 3, 1, 1, 1, 1),
-    #                        'modality_label_location': (1, 7)})
-    #     return shape_dict
-    #
-    # @property
-    # def tf_dtypes(self):
-    #     """
-    #     returns a dictionary of sampler output tensorflow dtypes
-    #     """
-    #     assert self.window, 'Unknown output shapes: self.window not initialised'
-    #     shape_dict = self.window.tf_dtypes
-    #     shape_dict.update({'modality_label': tf.float32,
-    #                        'modality_location': tf.int32})
-    #     return shape_dict
+    @property
+    def tf_shapes(self):
+        """
+        returns a dictionary of sampler output tensor shapes
+        """
+        assert self.window, 'Unknown output shapes: self.window not initialised'
+        shape_dict = self.window.tf_shapes
+        if self.csv_reader is not None:
+            shape_dict.update(self.csv_reader.tf_shapes)
+        output_shapes = nest.map_structure_up_to(
+            {'modality_slice': tf.float32,
+             'modality_slice_location': tf.int32},
+            tf.TensorShape,
+            {'modality_slice': (1, 80, 80, 10, 1, 3),
+             'modality_slice_location': (1, 7)}
+        )
+        shape_dict.update(output_shapes)
+        return shape_dict
+
+    @property
+    def tf_dtypes(self):
+        """
+        returns a dictionary of sampler output tensorflow dtypes
+        """
+        assert self.window, 'Unknown output shapes: self.window not initialised'
+        shape_dict = self.window.tf_dtypes
+        if self.csv_reader is not None:
+            shape_dict.update(self.csv_reader.tf_dtypes)
+        shape_dict.update({'modality_slice': tf.float32,
+                           'modality_slice_location': tf.int32})
+        return shape_dict
 
 
-def rand_spatial_coordinates(
+def weighted_spatial_coordinates(
         n_samples, img_spatial_size, win_spatial_size, sampler_map):
     """
-    Generate spatial coordinates from a discrete uniform distribution.
+    Weighted sampling from a map.
+    This function uses a cumulative histogram for fast sampling.
+
+    see also `sampler_uniform.rand_spatial_coordinates`
 
     :param n_samples: number of random coordinates to generate
     :param img_spatial_size: input image size
     :param win_spatial_size: input window size
-    :param sampler_map: sampling prior map (not in use)
+    :param sampler_map: sampling prior map, it's spatial shape should be
+            consistent with `img_spatial_size`
     :return: (n_samples, N_SPATIAL) coordinates representing sampling
               window centres relative to img_spatial_size
     """
-    tf.logging.debug('uniform sampler, prior %s ignored', sampler_map)
+    assert sampler_map is not None, \
+        'sampling prior map is not specified, ' \
+        'please check `sampler=` option in the config.'
+    # Get the cumulative sum of the normalised sorted intensities
+    # i.e. first sort the sampling frequencies, normalise them
+    # to sum to one, and then accumulate them in order
+    assert np.all(img_spatial_size[:N_SPATIAL] ==
+                  sampler_map.shape[:N_SPATIAL]), \
+        'image and sampling map shapes do not match'
+    win_spatial_size = np.asarray(win_spatial_size, dtype=np.int32)
+    cropped_map = crop_sampling_map(sampler_map, win_spatial_size)
+    flatten_map = cropped_map.flatten()
+    flatten_map = flatten_map - np.min(flatten_map)
+    normaliser = flatten_map.sum()
+    # get the sorting indexes to that we can invert the sorting later on.
+    sorted_indexes = np.argsort(flatten_map)
+    sorted_data = np.cumsum(
+        np.true_divide(flatten_map[sorted_indexes], normaliser))
 
-    # Sample coordinates at random
-    half_win = np.floor(np.asarray(win_spatial_size) / 2.0).astype(np.int32)
-    max_coords = np.zeros((n_samples, N_SPATIAL), dtype=np.int32)
-    for (idx, (img, win)) in enumerate(
-            zip(img_spatial_size[:N_SPATIAL], win_spatial_size[:N_SPATIAL])):
-        max_coords[:, idx] = np.random.randint(
-            0, max(img - win + 1, 1), n_samples)
-    max_coords[:, :N_SPATIAL] = \
-        max_coords[:, :N_SPATIAL] + half_win[:N_SPATIAL]
-    return max_coords
+    middle_coords = np.zeros((n_samples, N_SPATIAL), dtype=np.int32)
+    for sample in range(0, n_samples):
+        # get n_sample from the cumulative histogram, spaced by 1/n_samples,
+        # plus a random perturbation to give us a stochastic sampler
+        sample_ratio = 1 - (np.random.random() + sample) / (n_samples + 1)
+        # find the index where the cumulative it above the sample threshold
+        try:
+            if normaliser == 0:
+                # constant map? reducing to a uniform sampling
+                sample_index = np.random.randint(len(sorted_data))
+            else:
+                sample_index = np.argmax(sorted_data >= sample_ratio)
+        except ValueError:
+            tf.logging.fatal("unable to choose sampling window based on "
+                             "the current frequency map.")
+            raise
+        # invert the sample index to the pre-sorted index
+        inverted_sample_index = sorted_indexes[sample_index]
+        # get the x,y,z coordinates on the cropped_map
+        middle_coords[sample, :N_SPATIAL] = np.unravel_index(
+            inverted_sample_index, cropped_map.shape)[:N_SPATIAL]
+
+    # re-shift coords due to the crop
+    half_win = np.floor(win_spatial_size / 2).astype(np.int32)
+    middle_coords[:, :N_SPATIAL] = \
+        middle_coords[:, :N_SPATIAL] + half_win[:N_SPATIAL]
+    return middle_coords
+
+
+def crop_sampling_map(input_map, win_spatial_size):
+    """
+    Utility function for generating a cropped version of the
+    input sampling prior map (the input weight map where the centre of
+    the window might be). If the centre of the window was outside of
+    this crop area, the patch would be outside of the field of view
+
+    :param input_map: the input weight map where the centre of
+                      the window might be
+    :param win_spatial_size: size of the borders to be cropped
+    :return: cropped sampling map
+    """
+
+    # prepare cropping indices
+    _start, _end = [], []
+    for win_size, img_size in \
+            zip(win_spatial_size[:N_SPATIAL], input_map.shape[:N_SPATIAL]):
+        # cropping floor of the half window
+        d_start = int(win_size / 2.0)
+        # using ceil of half window
+        d_end = img_size - win_size + int(win_size / 2.0 + 0.6)
+
+        _start.append(d_start)
+        _end.append(d_end + 1 if d_start == d_end else d_end)
+
+    try:
+        assert len(_start) == 3
+        cropped_map = input_map[
+                      _start[0]:_end[0], _start[1]:_end[1], _start[2]:_end[2], 0, 0]
+        assert np.all(cropped_map.shape) > 0
+    except (IndexError, KeyError, TypeError, AssertionError):
+        tf.logging.fatal(
+            "incompatible map: %s and window size: %s\n"
+            "try smaller (fully-specified) spatial window sizes?",
+            input_map.shape, win_spatial_size)
+        raise
+    return cropped_map
 
 
 def _infer_spatial_size(img_sizes, win_sizes):
@@ -298,3 +416,19 @@ def _infer_spatial_size(img_sizes, win_sizes):
             win_spatial_size, img_spatial_size)
 
     return img_spatial_size, win_spatial_size
+
+
+def zoom_3d(image, ratio, interp_order):
+    """
+    Taking 5D image as input, and zoom each 3D slice independently
+    """
+    assert image.ndim == 5, "input images should be 5D array"
+    output = []
+    for time_pt in range(image.shape[3]):
+        output_mod = []
+        for mod in range(image.shape[4]):
+            zoomed = scipy.ndimage.zoom(
+                image[..., time_pt, mod], ratio[:3], order=interp_order)
+            output_mod.append(zoomed[..., np.newaxis, np.newaxis])
+        output.append(np.concatenate(output_mod, axis=-1))
+    return np.concatenate(output, axis=-2)

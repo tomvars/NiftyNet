@@ -101,7 +101,6 @@ class UniformAndResizeSampler(ImageWindowDatasetCSV):
             win_sizes=static_window_shapes,
             n_samples=self.window.n_samples)
 
-
         # fill output dict with data
         for name in list(data):
             coordinates_key = LOCATION_FORMAT.format(name)
@@ -143,7 +142,8 @@ class UniformAndResizeSampler(ImageWindowDatasetCSV):
             for name in self.csv_reader.names:
                 output_dict[name + '_location'] = output_dict['image_location']
         ###### Update the output_dict with the permuted modalities ######
-        output_dict['modality_label'] = apply_niftynet_format_to_data(permuted_indices.astype(np.float32))
+        output_dict['modality_label'] = np.repeat(apply_niftynet_format_to_data(permuted_indices.astype(np.float32)), 10, axis=1)
+        print('MODALITY LABEL SHAPE', output_dict['modality_label'].shape)
         output_dict['modality_label_location'] = output_dict['image_location']
         #################################################################
 
@@ -338,6 +338,7 @@ def _infer_spatial_size(img_sizes, win_sizes):
             win_spatial_size, img_spatial_size)
 
     return img_spatial_size, win_spatial_size
+
 
 def zoom_3d(image, ratio, interp_order):
     """
