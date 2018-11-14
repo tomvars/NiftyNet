@@ -150,27 +150,27 @@ class WeightedAndResizeSampler(ImageWindowDatasetCSV):
         name = 'modality_slice'
         coordinates_key = LOCATION_FORMAT.format(name)
         image_data_key = name
-        window_shape = (80, 80, 10, 1, 1)
+        window_shape = (80, 80, 1, 1, 1)
         output_dict[coordinates_key] = self.dummy_coordinates(
             image_id, window_shape, self.window.n_samples).astype(np.int32)
         image_array = []
-        for _ in range(self.window.n_samples):
+        for i in range(-5, 5):
             # prepare image data
-            image_shape = tuple(list(data['image'].shape[:3]) + [1, 1])
+            image_shape = tuple(list(data['image'].shape[:2]) + [1, 1, 1])
             if image_shape == window_shape or interp_orders['image'][0] < 0:
                 # already in the same shape
                 image_window = data['image']
             else:
                 zoom_ratio = [float(p) / float(d) for p, d in zip(window_shape, image_shape)]
+                central_slice = data['image'].shape[2] // 2
                 image_window = zoom_3d(
-                    # image=data['image'][:, :, central_slice - 5 , ...][:, :, np.newaxis, ...],
-                    image=data['image'],
+                    image=data['image'][:, :, central_slice + i, ...][:, :, np.newaxis, ...],
+                    # image=data['image'],
                     ratio=zoom_ratio,
                     interp_order=3)
             image_array.append(image_window[np.newaxis, ...])
         if len(image_array) > 1:
-            output_dict[image_data_key] = \
-                np.concatenate(image_array, axis=0).astype(np.float32)
+            output_dict[image_data_key] = np.concatenate(image_array, axis=3).astype(np.float32)
         else:
             output_dict[image_data_key] = image_array[0].astype(np.float32)
         # print('output_shape in weighted sampler', output_dict[image_data_key].shape)

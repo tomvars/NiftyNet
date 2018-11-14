@@ -67,12 +67,12 @@ class ApplyGradients(object):
         :param msg: an iteration message instance
         :return:
         """
-        if msg['iter_msg'].is_training and msg['iter_msg'].current_iter < 1000:
-           msg['iter_msg'].ops_to_run['gradients'] = sender.gradient_op1
-        elif msg['iter_msg'].is_training and msg['iter_msg'].current_iter >= 1000:
+        # if msg['iter_msg'].is_training and msg['iter_msg'].current_iter < 1000:
+        #    msg['iter_msg'].ops_to_run['gradients'] = sender.gradient_op1
+        # elif msg['iter_msg'].is_training and msg['iter_msg'].current_iter >= 1000:
+        #     msg['iter_msg'].ops_to_run['gradients'] = sender.gradient_op2
+        if msg['iter_msg'].is_training:
             msg['iter_msg'].ops_to_run['gradients'] = sender.gradient_op2
-        # if msg['iter_msg'].is_training:
-        #     msg['iter_msg'].ops_to_run['gradients'] = sender.gradient_op
 
 def _apply_gradients(optimiser, gradients):
     """
