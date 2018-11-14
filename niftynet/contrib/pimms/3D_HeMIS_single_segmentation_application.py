@@ -434,9 +434,9 @@ class SegmentationApplication(BaseApplication):
             if self.net_param.decay > 0.0 and reg_losses:
                 reg_loss = tf.reduce_mean(
                     [tf.reduce_mean(reg_loss) for reg_loss in reg_losses])
-                loss = seg_loss + reg_loss + class_loss_multiplier * modality_classification_loss * 100
+                loss = seg_loss + reg_loss + class_loss_multiplier * modality_classification_loss
             else:
-                loss = seg_loss + class_loss_multiplier * modality_classification_loss * 1000
+                loss = seg_loss + class_loss_multiplier * modality_classification_loss
             grads = self.optimiser.compute_gradients(
                 loss, colocate_gradients_with_ops=True)
             # collecting gradients variables

@@ -47,10 +47,10 @@ class SingletaskPIMMS3D(BaseNet):
     def layer_op(self, input_tensor, modality_slice, is_training, outputs_collector=None):
         n_modalities = self.n_modalities
         n_subj_in_batch = input_tensor.shape.as_list()[0]
-        print(input_tensor.shape.as_list())
         tf.logging.info('Input tensor dims: %s' % input_tensor.shape)
+        tf.logging.info('modality_slice dims: %s' % modality_slice.shape)
         modality_slice_reshaped = tf.reshape(
-            modality_slice, [n_subj_in_batch, modality_slice.shape[1], modality_slice.shape[2], -1]
+            modality_slice, [modality_slice.shape[0], modality_slice.shape[1], modality_slice.shape[2], -1]
         )
         tf.logging.info('modality_slice_reshaped: %s' % modality_slice_reshaped.shape)
         n_ims_per_subj = modality_slice_reshaped.shape.as_list()[-1]
@@ -59,21 +59,13 @@ class SingletaskPIMMS3D(BaseNet):
                                          w_regularizer=self.regularizers['w'],
                                          b_regularizer=self.regularizers['b'],
                                          with_bn=True)
-            print(modality_slice.shape)
-            modality_scores = tf.reshape(
-                tf.expand_dims(
-                    modality_classifier(
-                        tf.expand_dims(
-                            tf.reshape(tf.transpose(modality_slice_reshaped, [0, 3, 1, 2]),
-                                       [n_subj_in_batch * n_ims_per_subj,
-                                        modality_slice_reshaped.shape.as_list()[1],
-                                        modality_slice_reshaped.shape.as_list()[2]]),
-                            axis=-1)
-                        , is_training)
-                    , axis=0), [n_subj_in_batch, n_ims_per_subj, -1])
-        modality_scores_modified = tf.reshape(modality_scores, [n_subj_in_batch, modality_slice.shape[-1], modality_slice.shape[3], -1])
+            modality_scores = modality_classifier(tf.einsum('ijkl->ljki', modality_slice_reshaped), is_training)
+            modality_scores = tf.Print(modality_scores, [tf.argmax(modality_scores, axis=-1)])
+        tf.logging.info('modality_scores: %s' % modality_scores.shape)
+        modality_scores_modified = tf.reshape(modality_scores, [n_subj_in_batch, modality_slice.shape[3], modality_slice.shape[-1], -1])
+        modality_scores_modified = tf.Print(modality_scores_modified, [tf.argmax(modality_scores_modified[0, ...], axis=-1)[:, 0]])
         tf.logging.info('modality_scores_modified: %s' % modality_scores_modified.shape)
-        modality_scores_modified_after_mean = tf.reduce_mean(modality_scores_modified, axis=2)
+        modality_scores_modified_after_mean = tf.reduce_mean(modality_scores_modified, axis=1)
         tf.logging.info('modality_scores_modified_after_mean: %s' % modality_scores_modified_after_mean.shape)
         modality_tensor = tf.expand_dims(tf.expand_dims(tf.expand_dims(modality_scores_modified_after_mean, axis=2), axis=2),
                                          axis=2)
@@ -111,8 +103,7 @@ class SingletaskPIMMS3D(BaseNet):
                                                  w_regularizer=self.regularizers['w'])
         segmentation_tensor = segmentation_op(abstraction_tensor, is_training)
         tf.logging.info('Segmentation frontend output dims: %s' % segmentation_tensor.shape)
-        classification_tensor = tf.reshape(tf.transpose(modality_scores, [0, 2, 1]),
-                                           shape=[n_subj_in_batch, n_ims_per_subj, n_modalities])
+        classification_tensor = tf.expand_dims(modality_scores, axis=0)
         tf.logging.info('Classification tensor output dims: %s' % classification_tensor.shape)
         return segmentation_tensor, classification_tensor
 
