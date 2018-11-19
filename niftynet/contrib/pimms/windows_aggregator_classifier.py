@@ -50,9 +50,11 @@ class ClassifierSamplesAggregator(ImageWindowsAggregator):
     def _save_current_image(self, image_out, location):
         if self.input_image is None:
             return
-        window_shape = [1, 1, 1, 1, image_out.shape[-1]]
+        window_shape = [1, 1, 1, 1, image_out.shape[-1]*image_out.shape[0]]
         image_out = np.reshape(image_out, window_shape)
         subject_name = self.reader.get_subject_id(self.image_id)
+        if not os.path.exists(os.path.dirname(self.csv_path)):
+            os.makedirs(os.path.dirname(self.csv_path))
         with open(self.csv_path, 'a') as csv_file:
             data_str = ','.join([str(i) for i in np.hstack((image_out[0, 0, 0, 0, :], location[1:]))])
             csv_file.write(subject_name+','+data_str+'\n')

@@ -117,55 +117,55 @@ class GridSampler(ImageWindowDataset):
                 yield output_dict
 
 
-def grid_spatial_coordinates(subject_id, img_sizes, win_sizes, border_size):
-    """
-    This function generates all coordinates of feasible windows, with
-    step sizes specified in grid_size parameter.
+    def grid_spatial_coordinates(self, subject_id, img_sizes, win_sizes, border_size):
+        """
+        This function generates all coordinates of feasible windows, with
+        step sizes specified in grid_size parameter.
 
-    The border size changes the sampling locations but not the
-    corresponding window sizes of the coordinates.
+        The border size changes the sampling locations but not the
+        corresponding window sizes of the coordinates.
 
-    :param subject_id: integer value indicates the position of of this
-        image in ``image_reader.file_list``
-    :param img_sizes: a dictionary of image shapes, ``{input_name: shape}``
-    :param win_sizes: a dictionary of window shapes, ``{input_name: shape}``
-    :param border_size: size of padding on both sides of each dim
-    :return:
-    """
-    all_coordinates = {}
-    for name, image_shape in img_sizes.items():
-        window_shape = win_sizes[name]
-        grid_size = [max(win_size - 2 * border, 0)
-                     for (win_size, border) in zip(window_shape, border_size)]
-        assert len(image_shape) >= N_SPATIAL, \
-            'incompatible image shapes in grid_spatial_coordinates'
-        assert len(window_shape) >= N_SPATIAL, \
-            'incompatible window shapes in grid_spatial_coordinates'
-        assert len(grid_size) >= N_SPATIAL, \
-            'incompatible border sizes in grid_spatial_coordinates'
-        steps_along_each_dim = [
-            _enumerate_step_points(starting=0,
-                                   ending=image_shape[i],
-                                   win_size=window_shape[i],
-                                   step_size=grid_size[i])
-            for i in range(N_SPATIAL)]
-        starting_coords = np.asanyarray(np.meshgrid(*steps_along_each_dim))
-        starting_coords = starting_coords.reshape((N_SPATIAL, -1)).T
-        n_locations = starting_coords.shape[0]
-        # prepare the output coordinates matrix
-        spatial_coords = np.zeros((n_locations, N_SPATIAL * 2), dtype=np.int32)
-        spatial_coords[:, :N_SPATIAL] = starting_coords
-        for idx in range(N_SPATIAL):
-            spatial_coords[:, N_SPATIAL + idx] = \
-                starting_coords[:, idx] + window_shape[idx]
-        max_coordinates = np.max(spatial_coords, axis=0)[N_SPATIAL:]
-        assert np.all(max_coordinates <= image_shape[:N_SPATIAL]), \
-            "window size greater than the spatial coordinates {} : {}".format(
-                max_coordinates, image_shape)
-        subject_list = np.ones((n_locations, 1), dtype=np.int32) * subject_id
-        spatial_coords = np.append(subject_list, spatial_coords, axis=1)
-        all_coordinates[name] = spatial_coords
-    return all_coordinates
+        :param subject_id: integer value indicates the position of of this
+            image in ``image_reader.file_list``
+        :param img_sizes: a dictionary of image shapes, ``{input_name: shape}``
+        :param win_sizes: a dictionary of window shapes, ``{input_name: shape}``
+        :param border_size: size of padding on both sides of each dim
+        :return:
+        """
+        all_coordinates = {}
+        for name, image_shape in img_sizes.items():
+            window_shape = win_sizes[name]
+            grid_size = [max(win_size - 2 * border, 0)
+                         for (win_size, border) in zip(window_shape, border_size)]
+            assert len(image_shape) >= N_SPATIAL, \
+                'incompatible image shapes in grid_spatial_coordinates'
+            assert len(window_shape) >= N_SPATIAL, \
+                'incompatible window shapes in grid_spatial_coordinates'
+            assert len(grid_size) >= N_SPATIAL, \
+                'incompatible border sizes in grid_spatial_coordinates'
+            steps_along_each_dim = [
+                _enumerate_step_points(starting=0,
+                                       ending=image_shape[i],
+                                       win_size=window_shape[i],
+                                       step_size=grid_size[i])
+                for i in range(N_SPATIAL)]
+            starting_coords = np.asanyarray(np.meshgrid(*steps_along_each_dim))
+            starting_coords = starting_coords.reshape((N_SPATIAL, -1)).T
+            n_locations = starting_coords.shape[0]
+            # prepare the output coordinates matrix
+            spatial_coords = np.zeros((n_locations, N_SPATIAL * 2), dtype=np.int32)
+            spatial_coords[:, :N_SPATIAL] = starting_coords
+            for idx in range(N_SPATIAL):
+                spatial_coords[:, N_SPATIAL + idx] = \
+                    starting_coords[:, idx] + window_shape[idx]
+            max_coordinates = np.max(spatial_coords, axis=0)[N_SPATIAL:]
+            assert np.all(max_coordinates <= image_shape[:N_SPATIAL]), \
+                "window size greater than the spatial coordinates {} : {} for subject_id {}".format(
+                    max_coordinates, image_shape, self.reader.get_subject_id(subject_id))
+            subject_list = np.ones((n_locations, 1), dtype=np.int32) * subject_id
+            spatial_coords = np.append(subject_list, spatial_coords, axis=1)
+            all_coordinates[name] = spatial_coords
+        return all_coordinates
 
 
 def _enumerate_step_points(starting, ending, win_size, step_size):

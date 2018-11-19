@@ -107,6 +107,13 @@ def __add_segmentation_args(parser):
         default=False)
 
     parser.add_argument(
+        "--idxs_to_drop",
+        metavar='',
+        help="Which modalities to drop at inference time using array of indices",
+        type=int_array,
+        default=[])
+
+    parser.add_argument(
         "--softmax",
         metavar='',
         help="[Training only] whether to append a softmax layer to network "

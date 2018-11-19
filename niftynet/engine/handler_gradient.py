@@ -34,22 +34,27 @@ class ApplyGradients(object):
         :return:
         """
         with tf.name_scope('ApplyGradients'):
-            #gradients = [(tf.clip_by_value(grad, -100., 100.), var) for grad, var in sender.gradients_collector.gradients[0]]
             gradients = sender.gradients_collector.gradients
-#            gradients2 = [(tf.clip_by_value(grad, -100., 100.), var) for grad, var in gradients if 'modality_classifier' not in var.name]
+            gradients1 = [(tf.clip_by_value(grad, -100., 100.), var)
+                          for grad, var in gradients[0]
+                          if 'modality_classifier' in var.name]
+            gradients2 = gradients
 
             bn_ops = tf.get_collection(BN_COLLECTION, PRIMARY_NAME_SCOPE)
+            bn_ops1 = [bn_op for bn_op in bn_ops if 'modality_classifier' in bn_op.name]
+            bn_ops2 = bn_ops
             if not bn_ops:
-                sender.gradient_op = _apply_gradients(
-                    sender.optimiser, gradients)
- #               sender.gradient_op2 = _apply_gradients(
- #                   sender.optimiser, gradients2)
+                sender.gradient_op1 = _apply_gradients(
+                    sender.optimiser, gradients1)
+                sender.gradient_op2 = _apply_gradients(
+                   sender.optimiser, gradients2)
             else:
-                with tf.get_default_graph().control_dependencies(bn_ops):
-                    sender.gradient_op = _apply_gradients(
-                        sender.optimiser, gradients)
-  #                  sender.gradient_op2 = _apply_gradients(
-   #                     sender.optimiser, gradients2)
+                with tf.get_default_graph().control_dependencies(bn_ops1):
+                    sender.gradient_op1 = _apply_gradients(
+                        sender.optimiser, gradients1)
+                with tf.get_default_graph().control_dependencies(bn_ops2):
+                    sender.gradient_op2 = _apply_gradients(
+                        sender.optimiser, gradients2)
 
     def add_gradients(self, sender, **msg):
         """
@@ -62,12 +67,12 @@ class ApplyGradients(object):
         :param msg: an iteration message instance
         :return:
         """
-    #    if msg['iter_msg'].is_training and msg['iter_msg'].current_iter < 100:
-    #        msg['iter_msg'].ops_to_run['gradients'] = sender.gradient_op2
-    #    elif msg['iter_msg'].is_training and msg['iter_msg'].current_iter >= 100:
-        if msg['iter_msg'].is_training:
-            msg['iter_msg'].ops_to_run['gradients'] = sender.gradient_op
-
+        if msg['iter_msg'].is_training and msg['iter_msg'].current_iter < 1000:
+           msg['iter_msg'].ops_to_run['gradients'] = sender.gradient_op1
+        elif msg['iter_msg'].is_training and msg['iter_msg'].current_iter >= 1000:
+            msg['iter_msg'].ops_to_run['gradients'] = sender.gradient_op2
+        # if msg['iter_msg'].is_training:
+        #     msg['iter_msg'].ops_to_run['gradients'] = sender.gradient_op2
 
 def _apply_gradients(optimiser, gradients):
     """

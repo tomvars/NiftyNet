@@ -24,6 +24,7 @@ class GridSampler(ImageWindowDatasetCSV):
                  reader,
                  csv_reader,
                  window_sizes,
+                 idxs_to_drop=None,
                  batch_size=1,
                  spatial_window_size=None,
                  window_border=None,
@@ -47,7 +48,7 @@ class GridSampler(ImageWindowDatasetCSV):
             epoch=1,
             smaller_final_batch_mode=smaller_final_batch_mode,
             name=name)
-
+        self.idxs_to_drop = idxs_to_drop
         self.border_size = window_border or (0, 0, 0)
         assert isinstance(self.border_size, (list, tuple)), \
             "window_border should be a list or tuple"
@@ -66,6 +67,21 @@ class GridSampler(ImageWindowDatasetCSV):
                 self.reader.reset()
                 self.no_more_samples = True
                 continue
+            tf.logging.info('Called Sampler and self.idxs_to_drop is set to {}'.format(self.idxs_to_drop))
+            ##### Deterministic drop of modalities according to params#####
+            if self.idxs_to_drop:
+                assert isinstance(self.idxs_to_drop, tuple)
+                num_modalities = data['image'].shape[-1]
+                data_shape_without_modality = list(data['image'].shape)[:-1]
+                dropped_indices = []
+                for idx_to_drop in self.idxs_to_drop:
+                    print('DROPPING these modalities {}'.format(idx_to_drop))
+                    data['image'][..., idx_to_drop] = np.zeros(shape=data_shape_without_modality)
+                    dropped_indices.append(idx_to_drop)
+                # Randomly permute the inputs
+                permuted_indices = np.random.permutation(range(num_modalities))
+                data['image'] = data['image'][..., permuted_indices]
+            ########################################################
             image_shapes = {name: data[name].shape
                             for name in self.window.names}
             static_window_shapes = self.window.match_image_shapes(image_shapes)
@@ -133,7 +149,7 @@ class GridSampler(ImageWindowDatasetCSV):
                 output_dict[coordinates_key] = self.dummy_coordinates(
                     image_id, window_shape, self.window.n_samples).astype(np.int32)
                 image_array = []
-                for _ in range(self.window.n_samples):
+                for i in range(-5, 5):
                     # prepare image data
                     image_shape = tuple(list(data['image'].shape[:2]) + [1, 1, 1])
                     if image_shape == window_shape or interp_orders['image'][0] < 0:
@@ -142,15 +158,16 @@ class GridSampler(ImageWindowDatasetCSV):
                     else:
                         zoom_ratio = [float(p) / float(d) for p, d in zip(window_shape, image_shape)]
                         image_window = zoom_3d(
-                            image=data['image'][:, :, data['image'].shape[2] // 2, ...][:, :, np.newaxis, ...],
+                            image=data['image'][:, :, data['image'].shape[2] // 2 + i, ...][:, :, np.newaxis, ...],
+                            # image=data['image'],
                             ratio=zoom_ratio,
                             interp_order=3)
                     image_array.append(image_window[np.newaxis, ...])
                 if len(image_array) > 1:
-                    output_dict[image_data_key] = \
-                        np.concatenate(image_array, axis=0).astype(np.float32)
+                    output_dict[image_data_key] = np.concatenate(image_array, axis=3).astype(np.float32)
                 else:
                     output_dict[image_data_key] = image_array[0].astype(np.float32)
+                print('output_shape in grid sampler', output_dict[image_data_key].shape)
                 ##########################################################################################
                 yield output_dict
 
@@ -167,7 +184,7 @@ class GridSampler(ImageWindowDatasetCSV):
             {'modality_slice': tf.float32,
              'modality_slice_location': tf.int32},
             tf.TensorShape,
-            {'modality_slice': (1, 80, 80, 1, 1, 3),
+            {'modality_slice': (1, 80, 80, 10, 1, 3),
              'modality_slice_location': (1, 7)}
         )
         shape_dict.update(output_shapes)

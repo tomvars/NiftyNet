@@ -33,8 +33,11 @@ from niftynet.layer.rand_flip import RandomFlipLayer
 from niftynet.layer.rand_rotation import RandomRotationLayer
 from niftynet.layer.rand_spatial_scaling import RandomSpatialScalingLayer
 from niftynet.evaluation.classification_evaluator import ClassificationEvaluator
-from niftynet.contrib.pimms.windows_aggregator_classifier import ClassifierSamplesAggregator
+# from niftynet.contrib.pimms.windows_aggregator_classifier import ClassifierSamplesAggregator
+from niftynet.engine.windows_aggregator_classifier import ClassifierSamplesAggregator
 from niftynet.contrib.pimms.resnet_plugin import ResNet
+# from niftynet.network.resnet import ResNet
+from niftynet.contrib.pimms.vgg import VGG16Net
 
 
 SUPPORTED_INPUT = set(['image', 'modality_label', 'sampler', 'inferred'])
@@ -99,7 +102,6 @@ class ClassificationApplication(BaseApplication):
         self.csv_readers = [
             CSVReader(csv_reader_names).initialise(
                 data_param, task_param, file_list) for file_list in file_lists]
-        print(self.csv_readers)
         foreground_masking_layer = BinaryMaskingLayer(
             type_str=self.net_param.foreground_type,
             multimod_fusion=self.net_param.multimod_foreground_type,
@@ -204,6 +206,7 @@ class ClassificationApplication(BaseApplication):
             b_regularizer = regularizers.l1_regularizer(decay)
 
         self.net = ResNet(
+            with_bn=True,
             num_classes=self.classification_param.num_classes,
             w_initializer=InitializerFactory.get_initializer(
                 name=self.net_param.weight_initializer),
@@ -277,6 +280,7 @@ class ClassificationApplication(BaseApplication):
             grads = self.optimiser.compute_gradients(
                 loss, colocate_gradients_with_ops=True)
             # collecting gradients variables
+            grads = [(tf.clip_by_value(grad, -10, 10), var) for grad, var in grads]
             gradients_collector.add_to_collection([grads])
             # collecting output variables
             outputs_collector.add_to_collection(
@@ -287,13 +291,13 @@ class ClassificationApplication(BaseApplication):
                 average_over_devices=True, summary_type='scalar',
                 collection=TF_SUMMARIES)
             outputs_collector.add_to_collection(
-                var=tf.argmax(net_out, axis=-1), name='net_out',
+                var=tf.argmax(net_out, axis=-1)[:3], name='net_out',
                 average_over_devices=False,
                 summary_type='scalar',
                 collection=CONSOLE
             )
             outputs_collector.add_to_collection(
-                var=tf.squeeze(data_dict.get('modality_label', None)), name='y_true',
+                var=tf.squeeze(data_dict.get('modality_label', None))[:3], name='y_true',
                 average_over_devices=False,
                 summary_type='scalar',
                 collection=CONSOLE
@@ -304,8 +308,19 @@ class ClassificationApplication(BaseApplication):
                     255.0 * (mod_slice - tf.reduce_min(mod_slice)) /
                     (tf.reduce_max(mod_slice - tf.reduce_min(mod_slice))),
                     3 * math.pi / 2), name='sample',
-                average_over_devices=True, summary_type='image',
+                average_over_devices=False, summary_type='image',
                 collection=TF_SUMMARIES)
+            outputs_collector.add_to_collection(
+                var=data_dict['image'], name='image_sample',
+                average_over_devices=False, summary_type='scalar',
+                collection=NETWORK_OUTPUT)
+            outputs_collector.add_to_collection(
+                var=data_dict['modality_label'], name='modality_label_sample',
+                average_over_devices=False, summary_type='scalar',
+                collection=NETWORK_OUTPUT)
+            outputs_collector.add_to_collection(
+                var=data_dict['image_location'], name='image_sample_location',
+                average_over_devices=False, collection=NETWORK_OUTPUT)
             self.add_confusion_matrix_summaries_(outputs_collector,
                                                  net_out,
                                                  data_dict)
@@ -314,8 +329,7 @@ class ClassificationApplication(BaseApplication):
             # classification probabilities or argmax classification labels
             data_dict = switch_sampler(for_training=False)
             image = tf.cast(data_dict['image'], tf.float32)
-            net_args = {'is_training': self.is_training,
-                        'keep_prob': self.net_param.keep_prob}
+            net_args = {'is_training': True}
             net_out = self.net(image, **net_args)
             tf.logging.info(
                 'net_out.shape may need to be resized: %s', net_out.shape)
@@ -341,6 +355,12 @@ class ClassificationApplication(BaseApplication):
             self.initialise_aggregator()
 
     def interpret_output(self, batch_output):
+        import numpy as np
+        # np.save('batch_output_image_{}.npy'.format(self.readers[0].get_subject_id(batch_output['image_sample_location'][0][0])),
+        #         batch_output['image_sample'])
+        # np.save('batch_output_label.npy', batch_output['modality_label_sample'])
+        # for idx, image_id_array in enumerate(batch_output['image_sample_location']):
+        #     print('in validation:', batch_output['modality_label_sample'][idx], self.readers[1].get_subject_id(image_id_array[0]))
         if not self.is_training:
             return self.output_decoder.decode_batch(
                 batch_output['window'], batch_output['location'])

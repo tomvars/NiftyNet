@@ -134,11 +134,8 @@ class CSVReader(Layer):
                 #  Take the list of idx corresponding to subject id and randomly
                 # sample from there
                 for name in self.valid_names:
-                    relevant_indices = np.where(self.df_by_task[
-                        name].index.get_loc(
-                        subject_id))[0]
-                    #relevant_indices = self._df.loc[subject_id]
-                    idx_dict[name] = random.choice(relevant_indices)
+                    relevant_index = self.df_by_task[name].index.get_loc(subject_id)
+                    idx_dict[name] = relevant_index
             else: # mode full i.e. output all the lines corresponding to
                     # subject_id
                 for name in self.valid_names:

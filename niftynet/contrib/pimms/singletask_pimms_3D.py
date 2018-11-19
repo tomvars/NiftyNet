@@ -23,6 +23,7 @@ class SingletaskPIMMS3D(BaseNet):
     Implementation uses the "Backend", "Abstraction", "Frontend" terminology of the
      paper to make it clearer.
     """
+
     def __init__(self,
                  num_classes,
                  n_modalities,
@@ -45,26 +46,29 @@ class SingletaskPIMMS3D(BaseNet):
 
     def layer_op(self, input_tensor, modality_slice, is_training, outputs_collector=None):
         n_modalities = self.n_modalities
-        n_ims_per_subj = input_tensor.shape.as_list()[-1]
         n_subj_in_batch = input_tensor.shape.as_list()[0]
-        z_size = input_tensor.shape.as_list()[-2]
-        print(input_tensor.shape.as_list())
         tf.logging.info('Input tensor dims: %s' % input_tensor.shape)
-        modality_scores = []
+        tf.logging.info('modality_slice dims: %s' % modality_slice.shape)
+        modality_slice_reshaped = tf.reshape(
+            modality_slice, [modality_slice.shape[0], modality_slice.shape[1], modality_slice.shape[2], -1]
+        )
+        tf.logging.info('modality_slice_reshaped: %s' % modality_slice_reshaped.shape)
+        n_ims_per_subj = modality_slice_reshaped.shape.as_list()[-1]
         with tf.variable_scope('modality_classifier') as scope:
             modality_classifier = ResNet(n_modalities,
                                          w_regularizer=self.regularizers['w'],
                                          b_regularizer=self.regularizers['b'],
                                          with_bn=True)
-            for i in range(n_ims_per_subj):
-                #### Do this conditionally? #####
-                scope.reuse_variables()
-                print(modality_slice.shape)
-                out = modality_classifier(tf.expand_dims(modality_slice[..., i], -1), True)
-                # out = tf.check_numerics(out, message='Modality classifier outputs NaNs')
-                modality_scores.append(out)
-
-        modality_tensor = tf.expand_dims(tf.expand_dims(tf.expand_dims(tf.stack(modality_scores, axis=-1), axis=2), axis=2), axis=2)
+            modality_scores = modality_classifier(tf.einsum('ijkl->ljki', modality_slice_reshaped), is_training)
+            modality_scores = tf.Print(modality_scores, [modality_scores])
+        tf.logging.info('modality_scores: %s' % modality_scores.shape)
+        modality_scores_modified = tf.reshape(modality_scores, [n_subj_in_batch, modality_slice.shape[3], modality_slice.shape[-1], -1])
+        modality_scores_modified = tf.Print(modality_scores_modified, [tf.argmax(modality_scores_modified[0, ...], axis=-1)[:, 0]])
+        tf.logging.info('modality_scores_modified: %s' % modality_scores_modified.shape)
+        modality_scores_modified_after_mean = tf.reduce_mean(modality_scores_modified, axis=1)
+        tf.logging.info('modality_scores_modified_after_mean: %s' % modality_scores_modified_after_mean.shape)
+        modality_tensor = tf.expand_dims(tf.expand_dims(tf.expand_dims(modality_scores_modified_after_mean, axis=2), axis=2),
+                                         axis=2)
         print('modality_tensor', modality_tensor.shape)
         expanded_input_tensor = tf.expand_dims(input_tensor, axis=1)
         print('expanded_input_tensor', expanded_input_tensor.shape)
@@ -72,14 +76,14 @@ class SingletaskPIMMS3D(BaseNet):
         print('attention_tensor', attention_tensor.shape)
         normalization_tensor = tf.reduce_sum(modality_tensor, axis=-1)
         print('normalization_tensor', normalization_tensor.shape)
-        attention_tensor = attention_tensor/normalization_tensor
+        attention_tensor = attention_tensor / normalization_tensor
         attention_tensor = tf.transpose(attention_tensor, [0, 2, 3, 4, 1], name='attention_tensor')
         print('attention_tensor', attention_tensor.shape)
         backend_outputs = []
         # Loop through each modality, compute the backend tensor of each one.
         for modality in range(n_modalities):
             _single_modality_backend_tensor = HighRes3DNetSmallBackendBlock(name='HeMISBackendBlock_' + str(modality),
-                                                                w_regularizer=self.regularizers['w'])
+                                                                            w_regularizer=self.regularizers['w'])
             tf.logging.info('attention_tensor input: %s' % attention_tensor[..., modality])
             _tensor = _single_modality_backend_tensor(tf.expand_dims(attention_tensor[..., modality], -1), is_training)
             # _tensor = _single_modality_backend_tensor(input_tensor[:, :, :, :, modality], is_training)
@@ -96,10 +100,10 @@ class SingletaskPIMMS3D(BaseNet):
         abstraction_tensor = abstraction_op(full_backend_tensor, is_training)
         tf.logging.info('Abstraction output dims: %s' % abstraction_tensor.shape)
         segmentation_op = HighRes3dFrontendBlock(num_classes=self.num_classes,
-                                             w_regularizer = self.regularizers['w'])
+                                                 w_regularizer=self.regularizers['w'])
         segmentation_tensor = segmentation_op(abstraction_tensor, is_training)
         tf.logging.info('Segmentation frontend output dims: %s' % segmentation_tensor.shape)
-        classification_tensor = tf.reshape(tf.transpose(tf.stack(modality_scores, axis=-1), [0, 2, 1]), shape=[n_subj_in_batch, n_ims_per_subj, n_modalities])
+        classification_tensor = tf.expand_dims(modality_scores, axis=0)
         tf.logging.info('Classification tensor output dims: %s' % classification_tensor.shape)
         return segmentation_tensor, classification_tensor
 
@@ -136,6 +140,15 @@ class HighRes3DNetSmallBackendBlock(BaseNet):
             {'name': 'res_2', 'n_features': 32, 'kernels': (3, 3), 'repeat': 3},
             {'name': 'res_3', 'n_features': 64, 'kernels': (3, 3), 'repeat': 3},
             {'name': 'conv_1', 'n_features': 80, 'kernel_size': 3}]
+
+        # self.layers = [
+        #     {'name': 'conv_0', 'n_features': 16, 'kernel_size': 3},
+        #     {'name': 'res_1', 'n_features': 16, 'kernels': (3, 3), 'repeat': 3},
+        #     {'name': 'res_2', 'n_features': 32, 'kernels': (3, 3), 'repeat': 3},
+        #     {'name': 'res_3', 'n_features': 64, 'kernels': (3, 3), 'repeat': 3},
+        #     {'name': 'conv_1', 'n_features': 64, 'kernel_size': 3},
+        #     {'name': 'conv_2', 'n_features': 64, 'kernel_size': 1},
+        #     {'name': 'conv_3', 'n_features': num_classes, 'kernel_size': 1}]
 
     def layer_op(self, images, is_training=True, layer_id=-1, **unused_kwargs):
         assert (layer_util.check_spatial_dims(
@@ -231,11 +244,11 @@ class HighRes3DNetSmallBackendBlock(BaseNet):
                        true_fn=lambda: flow,
                        false_fn=lambda: tf.zeros(flow.shape))
 
+
 class HeMISAbstractionBlock(TrainableLayer):
     def __init__(self,
                  pooling_type='average',
                  name='HeMISAbstractionBlock'):
-
         super(HeMISAbstractionBlock, self).__init__(name=name)
 
         self.pooling_type = pooling_type
@@ -267,7 +280,6 @@ class HighRes3dFrontendBlock(BaseNet):
                  b_regularizer=None,
                  acti_func='prelu',
                  name='HighRes3DNet'):
-
         super(HighRes3dFrontendBlock, self).__init__(
             w_initializer=w_initializer,
             w_regularizer=w_regularizer,

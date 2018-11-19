@@ -458,6 +458,7 @@ def _create_image(file_list, idx, modalities, data_param):
             # the file_path of a multimodal image will contain `nan`, e.g.
             # this should be handled by `ImageFactory.create_instance`
             # ('testT1.nii.gz', 'testT2.nii.gz', nan, 'testFlair.nii.gz')
+            print(file_path)
             return None
 
         interp_order, pixdim, axcodes, loader = [], [], [], []

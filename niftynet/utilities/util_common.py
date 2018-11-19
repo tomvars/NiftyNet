@@ -432,7 +432,8 @@ def tf_config():
     """
     tensorflow system configurations
     """
-    config = tf.ConfigProto()
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.9)
+    config = tf.ConfigProto(gpu_options=gpu_options)
     config.log_device_placement = False
     config.allow_soft_placement = True
     return config

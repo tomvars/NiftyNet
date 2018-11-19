@@ -34,7 +34,7 @@ class ResNet(BaseNet):
                  w_regularizer=None,
                  b_initializer=None,
                  b_regularizer=None,
-                 with_bn=True,
+                 with_bn=False,
                  acti_func='relu',
                  name='ResNet'):
 
@@ -72,9 +72,10 @@ class ResNet(BaseNet):
         layers = self.create()
         out = layers.conv1(images, is_training)
         for block in layers.blocks:
-            out = tf.check_numerics(out, message='NaNs in the blocks')
+            # out = tf.check_numerics(out, message='NaNs in the blocks')
             out = block(out, is_training)
-        out = tf.expand_dims(tf.reduce_mean(tf.nn.relu(layers.bn(out, is_training)), axis=[1, 2, 3]), axis=[-1])
+        # out = tf.expand_dims(tf.reduce_mean(tf.nn.relu(layers.bn(out, is_training)), axis=[1, 2, 3]), axis=[-1])
+        out = tf.expand_dims(tf.reduce_mean(tf.nn.relu(out), axis=[1, 2, 3]), axis=[-1])
         tf.logging.info('{} shape: {}'.format(out.name, out.shape))
         out = layers.fc(out)
         tf.logging.info('{} shape: {}'.format(out.name, out.shape))
@@ -98,16 +99,16 @@ class BottleneckBlock(TrainableLayer):
     def create(self, input_chns):
         if self.n_output_chns == input_chns:
             b1 = self.Conv(self.bottle_neck_chns, kernel_size=1,
-                           stride=self.stride)
-            b2 = self.Conv(self.bottle_neck_chns, kernel_size=3)
-            b3 = self.Conv(self.n_output_chns, 1)
+                           stride=self.stride, with_bn=self.with_bn)
+            b2 = self.Conv(self.bottle_neck_chns, kernel_size=3, with_bn=self.with_bn)
+            b3 = self.Conv(self.n_output_chns, 1, with_bn=self.with_bn)
             return BottleneckBlockDesc1(conv=[b1, b2, b3])
         else:
             b1 = BNLayer()
             b2 = self.Conv(self.bottle_neck_chns, kernel_size=1,
                            stride=self.stride, acti_func=None, with_bn=self.with_bn)
-            b3 = self.Conv(self.bottle_neck_chns, kernel_size=3)
-            b4 = self.Conv(self.n_output_chns, kernel_size=1)
+            b3 = self.Conv(self.bottle_neck_chns, kernel_size=3, with_bn=self.with_bn)
+            b4 = self.Conv(self.n_output_chns, kernel_size=1, with_bn=self.with_bn)
             b5 = self.Conv(self.n_output_chns, kernel_size=1,
                            stride=self.stride, acti_func=None, with_bn=self.with_bn)
             return BottleneckBlockDesc2(common_bn=b1, conv=[b2, b3, b4],

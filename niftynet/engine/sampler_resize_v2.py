@@ -104,6 +104,8 @@ class ResizeSampler(ImageWindowDataset):
         # [enqueue_batch_size, x, y, z, time, modality]
         # here enqueue_batch_size = 1 as we only have one sample
         # per image
+        img = output_dict['image']
+        np.save('sample_batch_image.npy', img)
         return output_dict
 
 

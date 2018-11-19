@@ -39,7 +39,7 @@ class BNLayer(TrainableLayer):
         # # operates on all dims except the last dim
         # params_shape = input_shape[-1:]
         # axes = list(range(input_shape.ndims - 1))
-        #
+
         # # create trainable variables and moving average variables
         # beta = tf.get_variable(
         #     'beta',
@@ -77,9 +77,7 @@ class BNLayer(TrainableLayer):
         #
         # # call the normalisation function
         # if is_training or use_local_stats:
-        #     # with tf.control_dependencies(
-        #     #         [update_moving_mean, update_moving_variance]):
-        #     outputs = tf.contrib.layers.batch_norm(
+        #     outputs = tf.nn.batch_normalization(
         #         inputs, mean, variance,
         #         beta, gamma, self.eps, name='batch_norm')
         # else:
@@ -89,25 +87,52 @@ class BNLayer(TrainableLayer):
         # outputs.set_shape(inputs.get_shape())
         # return outputs
 
-        # # Regularizers are not currently supported for fused batch norm.
-        return tf.contrib.layers.batch_norm(
+        return tf.layers.batch_normalization(
             inputs,
-            decay=self.moving_decay,
+            axis=-1,
+            momentum=self.moving_decay,
+            epsilon=self.eps,
             center=True,
             scale=True,
-            epsilon=self.eps,
-            activation_fn=None,
-            param_initializers=self.initializers,
-            param_regularizers=self.regularizers,
-            updates_collections=None,
-            is_training=is_training,
+            beta_initializer=self.initializers['beta'],
+            gamma_initializer=self.initializers['gamma'],
+            moving_mean_initializer=self.initializers['moving_mean'],
+            moving_variance_initializer=self.initializers['moving_variance'],
+            beta_regularizer=self.regularizers['beta'],
+            gamma_regularizer=self.regularizers['gamma'],
+            beta_constraint=None,
+            gamma_constraint=None,
+            training=False,
+            trainable=is_training or use_local_stats,
+            name='batch_norm',
             reuse=None,
-            variables_collections=[tf.GraphKeys.MOVING_AVERAGE_VARIABLES,
-                                   tf.GraphKeys.GLOBAL_VARIABLES],
-            outputs_collections=None,
-            trainable=True,
-            batch_weights=None,
-            fused=False,
-            data_format='NHWC',
-            zero_debias_moving_mean=False,
-            scope=None)
+            renorm=False,
+            renorm_clipping=None,
+            renorm_momentum=0.99,
+            fused=None,
+            virtual_batch_size=None,
+            adjustment=None
+        )
+
+        # # # Regularizers are not currently supported for fused batch norm.
+        # return tf.layers.batch_normalization(
+        #     inputs,
+        #     decay=self.moving_decay,
+        #     center=True,
+        #     scale=True,
+        #     epsilon=self.eps,
+        #     activation_fn=None,
+        #     param_initializers=self.initializers,
+        #     param_regularizers=self.regularizers,
+        #     updates_collections=None,
+        #     is_training=is_training,
+        #     reuse=None,
+        #     variables_collections=[tf.GraphKeys.MOVING_AVERAGE_VARIABLES,
+        #                            tf.GraphKeys.GLOBAL_VARIABLES],
+        #     outputs_collections=None,
+        #     trainable=True,
+        #     batch_weights=None,
+        #     fused=False,
+        #     data_format='NHWC',
+        #     zero_debias_moving_mean=False,
+        #     scope=None)
