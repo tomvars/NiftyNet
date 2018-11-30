@@ -25,6 +25,7 @@ class GridSampler(ImageWindowDatasetCSV):
                  csv_reader,
                  window_sizes,
                  idxs_to_drop=None,
+                 permuted_indices=None,
                  batch_size=1,
                  spatial_window_size=None,
                  window_border=None,
@@ -49,6 +50,7 @@ class GridSampler(ImageWindowDatasetCSV):
             smaller_final_batch_mode=smaller_final_batch_mode,
             name=name)
         self.idxs_to_drop = idxs_to_drop
+        self.permuted_indices = permuted_indices
         self.border_size = window_border or (0, 0, 0)
         assert isinstance(self.border_size, (list, tuple)), \
             "window_border should be a list or tuple"

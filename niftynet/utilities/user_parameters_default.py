@@ -637,6 +637,12 @@ def add_training_args(parser):
         type=str2boolean,
         default=False)
 
+    parser.add_argument(
+        "--curriculum_learning_iter",  # save_whole_volume_dir
+        help="Number of iterations in first training mode",
+        type=int,
+        default=0)
+
     return parser
 
 

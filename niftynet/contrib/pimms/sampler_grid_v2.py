@@ -21,6 +21,7 @@ class GridSampler(ImageWindowDataset):
                  reader,
                  window_sizes,
                  idxs_to_drop=None,
+                 permuted_indices=None,
                  batch_size=1,
                  spatial_window_size=None,
                  window_border=None,
@@ -46,6 +47,7 @@ class GridSampler(ImageWindowDataset):
 
         self.border_size = window_border or (0, 0, 0)
         self.idxs_to_drop = idxs_to_drop
+        self.permuted_indices = permuted_indices
         assert isinstance(self.border_size, (list, tuple)), \
             "window_border should be a list or tuple"
         while len(self.border_size) < N_SPATIAL:
@@ -74,7 +76,8 @@ class GridSampler(ImageWindowDataset):
                     data['image'][..., idx_to_drop] = np.zeros(shape=data_shape_without_modality)
                     dropped_indices.append(idx_to_drop)
                 # Randomly permute the inputs
-                permuted_indices = np.random.permutation(range(num_modalities))
+                tf.logging.info('Deterministically permuting with these indices: {}'.format(self.permuted_indices))
+                permuted_indices = list(range(num_modalities)) if not self.permuted_indices else self.permuted_indices
                 data['image'] = data['image'][..., permuted_indices]
                 ########################################################
             image_shapes = {name: data[name].shape

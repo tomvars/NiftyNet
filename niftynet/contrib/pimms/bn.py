@@ -39,7 +39,7 @@ class BNLayer(TrainableLayer):
         # # operates on all dims except the last dim
         # params_shape = input_shape[-1:]
         # axes = list(range(input_shape.ndims - 1))
-
+        #
         # # create trainable variables and moving average variables
         # beta = tf.get_variable(
         #     'beta',
@@ -115,7 +115,7 @@ class BNLayer(TrainableLayer):
         )
 
         # # # Regularizers are not currently supported for fused batch norm.
-        # return tf.layers.batch_normalization(
+        # return tf.contrib.layers.batch_norm(
         #     inputs,
         #     decay=self.moving_decay,
         #     center=True,

@@ -146,6 +146,7 @@ class ApplicationDriver(object):
             data_fractions = (train_param.exclude_fraction_for_validation,
                               train_param.exclude_fraction_for_inference) \
                 if do_new_partition else None
+            print(do_new_partition, data_fractions, system_param.dataset_split_file)
             self.data_partitioner.initialise(
                 data_param=data_param,
                 new_partition=do_new_partition,

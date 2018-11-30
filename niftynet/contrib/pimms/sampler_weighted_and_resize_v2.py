@@ -66,7 +66,16 @@ class WeightedAndResizeSampler(ImageWindowDatasetCSV):
         :return: output data dictionary
             ``{image_modality: data_array, image_location: n_samples * 7}``
         """
-        image_id, data, interp_orders = self.reader(idx=idx, shuffle=True)
+        found_valid_image = False
+        while not found_valid_image:
+            image_id, data, interp_orders = self.reader(idx=idx, shuffle=True)
+            image_shapes = dict(
+                (name, data[name].shape) for name in self.window.names)
+            if image_shapes['label'] == image_shapes['sampler']:
+                found_valid_image = True
+            else:
+                print('SHAPES', self.reader.get_subject_id(image_id), image_shapes, sep='\n')
+                idx +=1
         ##### Randomly drop modalities according to params #####
         num_modalities = data['image'].shape[-1]
         # These probabilities are obtained using
@@ -85,7 +94,6 @@ class WeightedAndResizeSampler(ImageWindowDatasetCSV):
         # Randomly permute the inputs
         permuted_indices = np.random.permutation(range(num_modalities))
         data['image'] = data['image'][..., permuted_indices]
-        print('These are the modality shapes after random permuting', data['image'].shape)
         ########################################################
         # initialise output dict, placeholders as dictionary keys
         # this dictionary will be used in
@@ -95,7 +103,6 @@ class WeightedAndResizeSampler(ImageWindowDatasetCSV):
         image_shapes = dict(
             (name, data[name].shape) for name in self.window.names)
         static_window_shapes = self.window.match_image_shapes(image_shapes)
-        print('SHAPES', self.reader.get_subject_id(image_id), image_shapes, static_window_shapes, sep='\n')
         coordinates = self._spatial_coordinates_generator(
             subject_id=image_id,
             data=data,
@@ -205,12 +212,8 @@ class WeightedAndResizeSampler(ImageWindowDatasetCSV):
                                  "the configuration file."
 
         # infer the largest spatial window size and check image spatial shapes
-        try:
-            img_spatial_size, win_spatial_size = \
-                _infer_spatial_size(img_sizes, win_sizes)
-        except Exception as e:
-            print(e)
-            raise Exception('Failed to read with subject_id: {}'.format(self.reader.get_subject_id(subject_id)))
+        img_spatial_size, win_spatial_size = \
+            _infer_spatial_size(img_sizes, win_sizes)
 
         sampling_prior_map = None
         try:

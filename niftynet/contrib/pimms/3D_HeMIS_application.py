@@ -245,6 +245,7 @@ class SegmentationApplication(BaseApplication):
             window_sizes=self.data_param,
             batch_size=self.net_param.batch_size,
             idxs_to_drop=self.segmentation_param.idxs_to_drop,
+            permuted_indices=self.segmentation_param.permuted_indices,
             spatial_window_size=self.action_param.spatial_window_size,
             window_border=self.action_param.border,
             smaller_final_batch_mode=self.net_param.smaller_final_batch_mode,

@@ -80,8 +80,9 @@ class UniformSampler(ImageWindowDatasetCSV):
             data['image'][..., idx_to_drop] = np.zeros(shape=data_shape_without_modality)
             dropped_indices.append(idx_to_drop)
         # Randomly permute the inputs
-        permuted_indices = np.random.permutation(range(num_modalities))
-        data['image'] = data['image'][..., permuted_indices]
+        # permuted_indices = np.random.permutation(range(num_modalities))
+        permuted_indices = np.array(list(range(num_modalities)))
+        # data['image'] = data['image'][..., permuted_indices]
         ########################################################
 
         image_shapes = dict(
@@ -140,10 +141,10 @@ class UniformSampler(ImageWindowDatasetCSV):
 
             for name in self.csv_reader.names:
                 output_dict[name + '_location'] = output_dict['image_location']
-        # ###### Update the output_dict with the permuted modalities ######
-        # output_dict['modality_label'] = apply_niftynet_format_to_data(permuted_indices.astype(np.float32))
-        # output_dict['modality_label_location'] = output_dict['image_location']
-        # #################################################################
+            ###### Update the output_dict with the permuted modalities ######
+            output_dict['modality_label'] = apply_niftynet_format_to_data(permuted_indices.astype(np.float32))
+            output_dict['modality_label_location'] = output_dict['image_location']
+            #################################################################
         return output_dict
 
     def _spatial_coordinates_generator(self,
