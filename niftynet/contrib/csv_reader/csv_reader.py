@@ -93,9 +93,13 @@ class CSVReader(Layer):
     
     def _parse_csv(self, csv_data_file, to_ohe):
         tf.logging.warning('This method will read your entire csv into memory')
+        print(csv_data_file)
         df = pd.read_csv(csv_data_file, index_col=0, header=None)
         df.index = df.index.map(str)
         if len(set(self.subject_ids) - set(df.index)) > 0:
+            pd.DataFrame(data=self.subject_ids).to_csv('subject_ids.csv', index=None)
+            print(self.subject_ids[:10])
+            print(df.index.values[:10])
             tf.logging.fatal('{} in dataset_split.csv vs'
                              ' {} in csv file'.format(len(set(self.subject_ids)), len(set(df.index))))
             tf.logging.fatal('Difference of size {}'.format(len(set(self.subject_ids) - set(df.index))))
