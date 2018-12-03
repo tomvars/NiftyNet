@@ -101,12 +101,13 @@ class MultitaskHeMIS3D(BaseNet):
         brain_parcellation_op = HighRes3dFrontendBlock(num_classes=160,
                                              w_regularizer=self.regularizers['w'])
         brain_parcellation_tensor = brain_parcellation_op(abstraction_tensor, is_training)
+        brain_parcellation_activation = brain_parcellation_op(abstraction_tensor, is_training, layer_id=-2)
         tf.logging.info('Brain Parcellation frontend output dims: %s' % brain_parcellation_tensor.shape)
         classification_tensor = tf.reshape(tf.transpose(tf.stack(modality_scores, axis=-1), [0, 2, 1]), shape=[n_subj_in_batch, n_ims_per_subj, n_modalities])
         tf.logging.info('Classification tensor output dims: %s' % classification_tensor.shape)
         return lesion_segmentation_tensor,\
                tumour_segmentation_tensor,\
-               brain_parcellation_tensor, classification_tensor
+               brain_parcellation_tensor, classification_tensor, brain_parcellation_activation
 
 
 class HighRes3DNetSmallBackendBlock(BaseNet):
@@ -317,6 +318,4 @@ class HighRes3dFrontendBlock(BaseNet):
         layer_instances.append((fc_layer, flow_task_1_out))
 
         # set training properties
-        if is_training:
-            return layer_instances[-1][1]
         return layer_instances[layer_id][1]

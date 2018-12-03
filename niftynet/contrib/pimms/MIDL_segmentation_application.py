@@ -21,6 +21,7 @@ from niftynet.layer.discrete_label_normalisation import \
 from niftynet.layer.histogram_normalisation import \
     HistogramNormalisationLayer
 from niftynet.layer.loss_segmentation import LossFunction as LossFunctionSeg
+from niftynet.layer.loss_regression import LossFunction as LossFunctionReg
 from niftynet.layer.loss_classification import LossFunction as LossFunctionClass
 from niftynet.layer.mean_variance_normalisation import \
     MeanVarNormalisationLayer
@@ -327,7 +328,16 @@ class SegmentationApplication(BaseApplication):
 
             image = tf.cast(data_dict['image'], tf.float32)
             net_args = {'is_training': self.is_training}
-            net_out, tumour_out, brain_parcellation, class_out = self.net(image, **net_args)
+            net_out, tumour_out, brain_parcellation, class_out, brain_parcellation_activation = self.net(image,
+                                                                                                         **net_args)
+            last_brain_parcellation_activation = tf.placeholder(dtype=tf.float32,
+                                                                shape=brain_parcellation_activation.shape)
+            outputs_collector.add_to_collection(
+                var=last_brain_parcellation_activation, name='last_brain_parcellation_activation',
+                average_over_devices=False, collection=NETWORK_OUTPUT)
+            outputs_collector.add_to_collection(
+                var=brain_parcellation_activation, name='current_brain_parcellation_activation',
+                average_over_devices=False, collection=NETWORK_OUTPUT)
 
             with tf.name_scope('Optimiser'):
                 optimiser_class = OptimiserFactory.create(
@@ -372,14 +382,12 @@ class SegmentationApplication(BaseApplication):
                 ground_truth=data_dict.get('label', None)[..., 2],
                 weight_map=data_dict.get('weight', None))
 
-            classification_loss_func = LossFunctionClass(
-                n_class=4,
-                loss_type='CrossEntropy',
-                multilabel=False
+            distillation_loss_func = LossFunctionReg(
+                loss_type='L2Loss'
             )
-            modality_classification_loss = classification_loss_func(
-                prediction=tf.reshape(class_out, [-1, 4]),
-                ground_truth=data_dict.get('modality_label', None)
+            distillation_loss = distillation_loss_func(
+                prediction=brain_parcellation_activation,
+                ground_truth=last_brain_parcellation_activation
             )
 
             reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
@@ -387,14 +395,14 @@ class SegmentationApplication(BaseApplication):
             if self.net_param.decay > 0.0 and reg_losses:
                 reg_loss = tf.reduce_mean(
                     [tf.reduce_mean(reg_loss) for reg_loss in reg_losses])
-                tumour_loss = lesion_seg_loss + tumour_seg_loss + reg_loss #+ modality_classification_loss
-                lesion_loss = tumour_seg_loss + lesion_seg_loss + brain_parcellation_loss + reg_loss #+ modality_classification_loss
+                tumour_loss = tumour_seg_loss + reg_loss + distillation_loss
+                lesion_loss = lesion_seg_loss + brain_parcellation_loss + reg_loss
                 loss = tf.cond(is_lesion,
                                true_fn=lambda: lesion_loss,
                                false_fn=lambda: tumour_loss)
             else:
-                tumour_loss = lesion_seg_loss + tumour_seg_loss #+ modality_classification_loss
-                lesion_loss = lesion_seg_loss + tumour_seg_loss + brain_parcellation_loss #+ modality_classification_loss
+                tumour_loss = tumour_seg_loss + distillation_loss
+                lesion_loss = lesion_seg_loss + brain_parcellation_loss
                 loss = tf.cond(is_lesion,
                                true_fn=lambda: lesion_loss,
                                false_fn=lambda: tumour_loss)
@@ -421,6 +429,14 @@ class SegmentationApplication(BaseApplication):
                 average_over_devices=False, collection=CONSOLE)
 
             outputs_collector.add_to_collection(
+                var=tf.to_float(is_lesion), name='is_lesion',
+                average_over_devices=False, collection=CONSOLE)
+
+            outputs_collector.add_to_collection(
+                var=my_tf_round(distillation_loss, 4), name='distillation_loss',
+                average_over_devices=False, collection=CONSOLE)
+
+            outputs_collector.add_to_collection(
                 var=my_tf_round(lesion_seg_loss, 4), name='lesion_seg_loss',
                 average_over_devices=False, collection=CONSOLE)
 
@@ -432,21 +448,13 @@ class SegmentationApplication(BaseApplication):
                 var=my_tf_round(brain_parcellation_loss, 4), name='parcellation_loss',
                 average_over_devices=False, collection=CONSOLE)
 
-            # outputs_collector.add_to_collection(
-            #     var=my_tf_round(modality_classification_loss, 4),
-            #     name='modality_classification_loss',
-            #     average_over_devices=False, collection=CONSOLE)
-            #
-            # outputs_collector.add_to_collection(
-            #     var=class_out, name='class_out',
-            #     average_over_devices=False, collection=CONSOLE)
-
-            # outputs_collector.add_to_collection(
-            #     var=my_tf_round(reg_loss, 4), name='reg_loss',
-            #     average_over_devices=False, collection=CONSOLE)
-
             outputs_collector.add_to_collection(
                 var=loss, name='loss',
+                average_over_devices=True, summary_type='scalar',
+                collection=TF_SUMMARIES)
+
+            outputs_collector.add_to_collection(
+                var=distillation_loss, name='distillation_loss',
                 average_over_devices=True, summary_type='scalar',
                 collection=TF_SUMMARIES)
 
@@ -464,11 +472,6 @@ class SegmentationApplication(BaseApplication):
                 var=brain_parcellation_loss, name='brain_parcellation_loss',
                 average_over_devices=True, summary_type='scalar',
                 collection=TF_SUMMARIES)
-
-            # outputs_collector.add_to_collection(
-            #     var=modality_classification_loss, name='modality_classification_loss',
-            #     average_over_devices=True, summary_type='scalar',
-            #     collection=TF_SUMMARIES)
 
             # look at only one modality
             for idx, modality in enumerate(['T1', 'T1c', 'T2', 'FLAIR']):
