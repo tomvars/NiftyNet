@@ -383,18 +383,19 @@ class SegmentationApplication(BaseApplication):
             )
 
             reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+            is_lesion = tf.greater(tf.count_nonzero(data_dict.get('label', None)[..., 0]), 0)
             if self.net_param.decay > 0.0 and reg_losses:
                 reg_loss = tf.reduce_mean(
                     [tf.reduce_mean(reg_loss) for reg_loss in reg_losses])
-                tumour_loss = tumour_seg_loss + reg_loss #+ modality_classification_loss
-                lesion_loss = lesion_seg_loss + brain_parcellation_loss + reg_loss #+ modality_classification_loss
-                loss = tf.cond(tf.greater(tf.count_nonzero(data_dict.get('label', None)[..., 0]), 0),
+                tumour_loss = lesion_seg_loss + tumour_seg_loss + reg_loss #+ modality_classification_loss
+                lesion_loss = tumour_seg_loss + lesion_seg_loss + brain_parcellation_loss + reg_loss #+ modality_classification_loss
+                loss = tf.cond(is_lesion,
                                true_fn=lambda: lesion_loss,
                                false_fn=lambda: tumour_loss)
             else:
-                tumour_loss = tumour_seg_loss #+ modality_classification_loss
-                lesion_loss = lesion_seg_loss + brain_parcellation_loss #+ modality_classification_loss
-                loss = tf.cond(tf.greater(tf.count_nonzero(data_dict.get('label', None)[..., 0]), 0),
+                tumour_loss = lesion_seg_loss + tumour_seg_loss #+ modality_classification_loss
+                lesion_loss = lesion_seg_loss + tumour_seg_loss + brain_parcellation_loss #+ modality_classification_loss
+                loss = tf.cond(is_lesion,
                                true_fn=lambda: lesion_loss,
                                false_fn=lambda: tumour_loss)
             grads = self.optimiser.compute_gradients(
@@ -410,6 +411,10 @@ class SegmentationApplication(BaseApplication):
             outputs_collector.add_to_collection(
                 var=current_iter, name='current_iter',
                 average_over_devices=False, collection=NETWORK_OUTPUT)
+
+            outputs_collector.add_to_collection(
+                var=tf.to_float(is_lesion), name='is_lesion',
+                average_over_devices=False, collection=CONSOLE)
 
             outputs_collector.add_to_collection(
                 var=my_tf_round(loss, 4), name='loss',
@@ -498,9 +503,12 @@ class SegmentationApplication(BaseApplication):
                     3 * math.pi / 2), name='lesion_segmentation_gt',
                 average_over_devices=True, summary_type='image3_axial',
                 collection=TF_SUMMARIES)
-            net_out = tf.argmax(tumour_out, axis=-1)
+            net_out = tf.argmax(tumour_out, axis=-1)[:1, ...]
             outputs_collector.add_to_collection(
-                var=tf.contrib.image.rotate(255 * (net_out[:1, ...]), 3 * math.pi / 2), name='tumour_segmentation',
+                var=tf.contrib.image.rotate(
+                    255 * (net_out - tf.reduce_min(net_out)) /
+                    (tf.reduce_max(net_out - tf.reduce_min(net_out))),
+                    3 * math.pi / 2), name='tumour_segmentation',
                 average_over_devices=True, summary_type='image3_axial',
                 collection=TF_SUMMARIES)
             outputs_collector.add_to_collection(

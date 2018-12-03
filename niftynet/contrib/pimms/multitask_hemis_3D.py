@@ -137,10 +137,10 @@ class HighRes3DNetSmallBackendBlock(BaseNet):
 
         self.layers = [
             {'name': 'conv_0', 'n_features': 16, 'kernel_size': 3},
-            {'name': 'res_1', 'n_features': 16, 'kernels': (3, 3), 'repeat': 3},
-            {'name': 'res_2', 'n_features': 32, 'kernels': (3, 3), 'repeat': 3},
-            {'name': 'res_3', 'n_features': 64, 'kernels': (3, 3), 'repeat': 3},
-            {'name': 'conv_1', 'n_features': 80, 'kernel_size': 3}]
+            {'name': 'res_1', 'n_features': 16, 'kernels': (3, 3), 'repeat': 2},
+            {'name': 'res_2', 'n_features': 32, 'kernels': (3, 3), 'repeat': 2},
+            {'name': 'res_3', 'n_features': 32, 'kernels': (3, 3), 'repeat': 2},
+            {'name': 'conv_1', 'n_features': 64, 'kernel_size': 3}]
 
     def layer_op(self, images, is_training=True, layer_id=-1, **unused_kwargs):
         assert (layer_util.check_spatial_dims(
@@ -149,12 +149,13 @@ class HighRes3DNetSmallBackendBlock(BaseNet):
         # and plugin data
         layer_instances = []
 
+        ###### representation network ######
+
         ### first convolution layer
         params = self.layers[0]
         first_conv_layer = ConvolutionalLayer(
             n_output_chns=params['n_features'],
             kernel_size=params['kernel_size'],
-            stride=2,
             acti_func=self.acti_func,
             w_initializer=self.initializers['w'],
             w_regularizer=self.regularizers['w'],
@@ -216,20 +217,7 @@ class HighRes3DNetSmallBackendBlock(BaseNet):
             w_initializer=self.initializers['w'],
             w_regularizer=self.regularizers['w'],
             name=params['name'])
-        flow = fc_layer(flow, is_training)
-        layer_instances.append((fc_layer, flow))
-
-        ### 3x3x3 deconvolution layer
-        params = self.layers[4]
-        fc_layer = DeconvolutionalLayer(
-            n_output_chns=params['n_features'],
-            kernel_size=3,
-            stride=2,
-            acti_func=self.acti_func,
-            w_initializer=self.initializers['w'],
-            w_regularizer=self.regularizers['w'],
-            name='deconv')
-        flow = fc_layer(flow, is_training)
+        flow = fc_layer(flow, is_training, keep_prob=0.5)
         layer_instances.append((fc_layer, flow))
         return flow
 
@@ -280,15 +268,17 @@ class HighRes3dFrontendBlock(BaseNet):
             name=name)
 
         self.layers = [
-            {'name': 'conv_1', 'n_features': 80, 'kernel_size': 1},
-            {'name': 'conv_2', 'n_features': num_classes, 'kernel_size': 1}]
+            {'name': 'task_1_fc_1', 'n_features': 32, 'kernel_size': 3},
+            {'name': 'task_1_fc_2', 'n_features': 32, 'kernel_size': 1},
+            {'name': 'task_1_fc_out', 'n_features': num_classes, 'kernel_size': 1}
+        ]
 
     def layer_op(self, flow, is_training, layer_id=-1):
         # go through self.layers, create an instance of each layer
         # and plugin data
         layer_instances = []
 
-        ### 1x1x1 convolution layer
+        ### 1x1x1 convolution layer for task_1
         params = self.layers[0]
         fc_layer = ConvolutionalLayer(
             n_output_chns=params['n_features'],
@@ -297,11 +287,25 @@ class HighRes3dFrontendBlock(BaseNet):
             w_initializer=self.initializers['w'],
             w_regularizer=self.regularizers['w'],
             name=params['name'])
-        flow = fc_layer(flow, is_training)
-        layer_instances.append((fc_layer, flow))
+        flow_task_1 = fc_layer(flow, is_training)
+        layer_instances.append((fc_layer, flow_task_1))
 
-        ### 1x1x1 convolution layer
+        ### 1x1x1 convolution layer for task_1
         params = self.layers[1]
+        fc_layer = ConvolutionalLayer(
+            n_output_chns=params['n_features'],
+            kernel_size=params['kernel_size'],
+            acti_func=self.acti_func,
+            w_initializer=self.initializers['w'],
+            w_regularizer=self.regularizers['w'],
+            name=params['name'])
+        flow_task_1 = fc_layer(flow_task_1, is_training)
+        layer_instances.append((fc_layer, flow_task_1))
+
+        ###### OUTPUT TASK 1 ######
+
+        ### 1x1x1 convolution layer output for task_1
+        params = self.layers[2]
         fc_layer = ConvolutionalLayer(
             n_output_chns=params['n_features'],
             kernel_size=params['kernel_size'],
@@ -309,8 +313,8 @@ class HighRes3dFrontendBlock(BaseNet):
             w_initializer=self.initializers['w'],
             w_regularizer=self.regularizers['w'],
             name=params['name'])
-        flow = fc_layer(flow, is_training)
-        layer_instances.append((fc_layer, flow))
+        flow_task_1_out = fc_layer(flow_task_1, is_training)
+        layer_instances.append((fc_layer, flow_task_1_out))
 
         # set training properties
         if is_training:

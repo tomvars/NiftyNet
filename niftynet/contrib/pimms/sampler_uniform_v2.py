@@ -50,6 +50,16 @@ class UniformSampler(ImageWindowDatasetCSV):
         self.window_centers_sampler = rand_spatial_coordinates
 
     # pylint: disable=too-many-locals
+
+    def get_idx(self, mode):
+        if mode == 'Tumour':
+            idx = self.reader._file_list[self.reader._file_list['subject_id'].str.contains('BRATS')].sample(
+                1).index.values[0]
+        else:
+            idx = self.reader._file_list[~self.reader._file_list['subject_id'].str.contains('BRATS')].sample(
+                1).index.values[0]
+        return idx
+
     def layer_op(self, idx=None):
         """
         This function generates sampling windows to the input buffer
@@ -63,7 +73,9 @@ class UniformSampler(ImageWindowDatasetCSV):
         :return: output data dictionary
             ``{image_modality: data_array, image_location: n_samples * 7}``
         """
-        image_id, data, _ = self.reader(idx=idx, shuffle=True)
+
+        mode = np.random.choice(['Tumour', 'Lesion'])
+        image_id, data, _ = self.reader(idx=self.get_idx(mode), shuffle=True)
         ##### Randomly drop modalities according to params #####
         num_modalities = data['image'].shape[-1]
         # These probabilities are obtained using
@@ -71,7 +83,8 @@ class UniformSampler(ImageWindowDatasetCSV):
         # N, rv = 4, t(0.1)
         # prob = [(rv.cdf((i+1)/N) - rv.cdf(i/N)) / (rv.cdf(1.0) - 0.5) for i in N]
         prob_dict = {3: [0.5078, 0.3014, 0.1908], 4: [0.4026, 0.2755, 0.1861, 0.1358]}
-        modalities_to_drop = int(np.random.choice(range(num_modalities), 1, p=prob_dict[num_modalities]))
+        # modalities_to_drop = int(np.random.choice(range(num_modalities), 1, p=prob_dict[num_modalities]))
+        modalities_to_drop = 0
         data_shape_without_modality = list(data['image'].shape)[:-1]
         random_indices = np.random.permutation(range(num_modalities))
         dropped_indices = []
