@@ -93,25 +93,21 @@ class MultitaskHeMIS3D(BaseNet):
         lesion_segmentation_op = HighRes3dFrontendBlock(num_classes=self.num_classes,
                                              w_regularizer=self.regularizers['w'], name='LesionFrontend')
         lesion_segmentation_tensor = lesion_segmentation_op(abstraction_tensor, is_training)
-        lesion_segmentation_activation = lesion_segmentation_op(abstraction_tensor, is_training, layer_id=-2)
         tf.logging.info('Lesion segmentation frontend output dims: %s' % lesion_segmentation_tensor.shape)
         tumour_segmentation_op = HighRes3dFrontendBlock(num_classes=4,
                                                  w_regularizer=self.regularizers['w'], name='TumourFrontend')
         tumour_segmentation_tensor = tumour_segmentation_op(abstraction_tensor, is_training)
-        tumour_segmentation_activation = tumour_segmentation_op(abstraction_tensor, is_training, layer_id=-2)
         tf.logging.info('Tumour Segmentation frontend output dims: %s' % tumour_segmentation_tensor.shape)
         brain_parcellation_op = HighRes3dFrontendBlock(num_classes=160,
                                              w_regularizer=self.regularizers['w'], name='ParcellationFrontend')
         brain_parcellation_tensor = brain_parcellation_op(abstraction_tensor, is_training)
         brain_parcellation_activation = brain_parcellation_op(abstraction_tensor, is_training, layer_id=-2)
-        # brain_parcellation_activation = brain_parcellation_tensor
         tf.logging.info('Brain Parcellation frontend output dims: %s' % brain_parcellation_tensor.shape)
         classification_tensor = tf.reshape(tf.transpose(tf.stack(modality_scores, axis=-1), [0, 2, 1]), shape=[n_subj_in_batch, n_ims_per_subj, n_modalities])
         tf.logging.info('Classification tensor output dims: %s' % classification_tensor.shape)
         return lesion_segmentation_tensor,\
                tumour_segmentation_tensor,\
-               brain_parcellation_tensor, classification_tensor,\
-               brain_parcellation_activation, tumour_segmentation_activation, lesion_segmentation_activation
+               brain_parcellation_tensor, classification_tensor, brain_parcellation_activation
 
 
 class HighRes3DNetSmallBackendBlock(BaseNet):
@@ -171,9 +167,7 @@ class HighRes3DNetSmallBackendBlock(BaseNet):
             acti_func=self.acti_func,
             w_initializer=self.initializers['w'],
             w_regularizer=self.regularizers['w'],
-            name=params['name'],
-
-        )
+            name=params['name'])
         flow = first_conv_layer(images, is_training)
         layer_instances.append((first_conv_layer, flow))
 
@@ -233,10 +227,7 @@ class HighRes3DNetSmallBackendBlock(BaseNet):
             name=params['name'])
         flow = fc_layer(flow, is_training, keep_prob=0.5)
         layer_instances.append((fc_layer, flow))
-
-        return tf.cond(tf.greater(tf.count_nonzero(images), 0),
-                       true_fn=lambda: flow,
-                       false_fn=lambda: tf.zeros(flow.shape))
+        return flow
 
 
 class HeMISAbstractionBlock(TrainableLayer):

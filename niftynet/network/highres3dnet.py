@@ -95,6 +95,7 @@ class HighRes3DNet(BaseNet):
             acti_func=self.acti_func,
             w_initializer=self.initializers['w'],
             w_regularizer=self.regularizers['w'],
+            featnorm_type='instance',
             name=params['name'])
         flow = first_conv_layer(images, is_training)
         layer_instances.append((first_conv_layer, flow))
@@ -152,6 +153,7 @@ class HighRes3DNet(BaseNet):
             acti_func=self.acti_func,
             w_initializer=self.initializers['w'],
             w_regularizer=self.regularizers['w'],
+            featnorm_type='instance',
             name=params['name'])
         flow = fc_layer(flow, is_training)
         layer_instances.append((fc_layer, flow))
@@ -164,6 +166,7 @@ class HighRes3DNet(BaseNet):
             acti_func=None,
             w_initializer=self.initializers['w'],
             w_regularizer=self.regularizers['w'],
+            featnorm_type='instance',
             name=params['name'])
         flow = fc_layer(flow, is_training)
         layer_instances.append((fc_layer, flow))

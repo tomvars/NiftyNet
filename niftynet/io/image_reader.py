@@ -233,7 +233,9 @@ class ImageReader(Layer):
             try:
                 image_data_dict[field] = image.get_data()
             except (EOFError, OSError):
-                raise Exception('file could not be loaded from path {}'.format(image._file_path))
+                tf.logging.info('file could not be loaded from path {}'.format(image._file_path))
+                return -1, None, None
+                #raise Exception('file could not be loaded from path {}'.format(image._file_path))
         interp_order_dict = \
             {field: image.interp_order for (
                 field, image) in image_dict.items()}

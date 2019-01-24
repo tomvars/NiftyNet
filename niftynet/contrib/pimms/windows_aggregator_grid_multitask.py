@@ -28,38 +28,46 @@ class GridSamplesAggregator(ImageWindowsAggregator):
                  output_path=os.path.join('.', 'output'),
                  window_border=(),
                  interp_order=0,
-                 postfix='_niftynet_out'):
+                 postfixes=None):
         ImageWindowsAggregator.__init__(
             self, image_reader=image_reader, output_path=output_path)
         self.name = name
         self.image_out = None
         self.window_border = window_border
         self.output_interp_order = interp_order
-        self.postfix = postfix
+        self.postfixes = postfixes
 
-    def decode_batch(self, window, location):
-        n_samples = location.shape[0]
-        window, location = self.crop_batch(window, location, self.window_border)
-
-        for batch_id in range(n_samples):
-            image_id, x_start, y_start, z_start, x_end, y_end, z_end = \
-                location[batch_id, :]
-            if image_id != self.image_id:
-                # image name changed:
-                #    save current image and create an empty image
-                self._save_current_image()
-                if self._is_stopping_signal(location[batch_id]) or \
-                        (self.image_id is not None and image_id < self.image_id):
-                    print('Has finished validating')
-                    return False
-                self.image_out = self._initialise_empty_image(
-                    image_id=image_id,
-                    n_channels=window.shape[-1],
-                    dtype=window.dtype)
-            self.image_out[x_start:x_end,
-                           y_start:y_end,
-                           z_start:z_end, ...] = window[batch_id, ...]
-        return True
+    def decode_batch(self, windows, location):
+        completion_dict = {}
+        for window, postfix in zip(windows, self.postfixes):
+            window, location = self.crop_batch(window, location, self.window_border)
+            n_samples = location.shape[0]
+            completion_dict[postfix] = False
+            for batch_id in range(n_samples):
+                image_id, x_start, y_start, z_start, x_end, y_end, z_end = \
+                    location[batch_id, :]
+                print(postfix, image_id, self.image_id)
+                if image_id != self.image_id:
+                    # image name changed:
+                    #    save current image and create an empty image
+                    self._save_current_image(postfix)
+                    if self.image_id is not None and image_id < self.image_id:
+                        print('Has finished validating')
+                        completion_dict[postfix] = True
+                        print(completion_dict)
+                        self.image_out = self._initialise_empty_image(
+                            image_id=image_id,
+                            n_channels=window.shape[-1],
+                            dtype=window.dtype)
+                        continue
+                    self.image_out = self._initialise_empty_image(
+                        image_id=image_id,
+                        n_channels=window.shape[-1],
+                        dtype=window.dtype)
+                self.image_out[x_start:x_end,
+                               y_start:y_end,
+                               z_start:z_end, ...] = window[batch_id, ...]
+        return not all(completion_dict.values())
 
     def _initialise_empty_image(self, image_id, n_channels, dtype=np.float):
         self.image_id = image_id
@@ -72,7 +80,7 @@ class GridSamplesAggregator(ImageWindowsAggregator):
                 empty_image, _ = layer(empty_image)
         return empty_image
 
-    def _save_current_image(self):
+    def _save_current_image(self, postfix):
         if self.input_image is None:
             return
 
@@ -82,9 +90,8 @@ class GridSamplesAggregator(ImageWindowsAggregator):
             if isinstance(layer, DiscreteLabelNormalisationLayer):
                 self.image_out, _ = layer.inverse_op(self.image_out)
         print(self.image_id)
-        print(np.sum(self.image_out.flatten()))
         subject_name = self.reader.get_subject_id(self.image_id)
-        filename = "{}{}.nii.gz".format(subject_name, self.postfix)
+        filename = "{}{}.nii.gz".format(subject_name, postfix)
         source_image_obj = self.input_image[self.name]
         misc_io.save_data_array(self.output_path,
                                 filename,

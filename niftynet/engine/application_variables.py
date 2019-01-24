@@ -249,8 +249,11 @@ def global_vars_init_or_restore(var_list=None):
     for scope, checkpoint_name, checkpoint_scope in restorable:
         variables_in_scope = tf.get_collection(
             tf.GraphKeys.GLOBAL_VARIABLES, scope=scope)
+        print([var for var in variables_in_scope if 'beta' in var.name or 'gamma' in var.name])
         checkpoint_file = resolve_checkpoint(checkpoint_name)
         variables_in_file = [v for (v, _) in list_variables(checkpoint_file)]
+        print([var for var in variables_in_file if 'beta' in var.name or 'gamma' in var.name])
+        exit()
         rename = lambda x: x.replace(scope, checkpoint_scope).replace(':0', '')
         to_restore = [v for v in variables_in_scope
                       if v in var_list and rename(v.name) in variables_in_file]

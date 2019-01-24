@@ -100,6 +100,8 @@ SUPPORTED_LOSS_SEGMENTATION = {
         'niftynet.layer.loss_segmentation.generalised_wasserstein_dice_loss',
     "SensSpec":
         'niftynet.layer.loss_segmentation.sensitivity_specificity_loss',
+    "DicePlusXEntTopK":
+        'niftynet.layer.loss_segmentation.dice_plus_xent_loss_top_k',
     # "L1Loss":
     #     'niftynet.layer.loss_segmentation.l1_loss',
     # "L2Loss":

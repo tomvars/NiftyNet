@@ -15,6 +15,7 @@ from niftynet.contrib.pimms.sampler_weighted_v2 import WeightedSampler
 # from niftynet.engine.sampler_weighted_v2 import WeightedSampler
 from niftynet.engine.sampler_balanced_v2 import BalancedSampler
 from niftynet.engine.windows_aggregator_grid import GridSamplesAggregator
+# from niftynet.contrib.pimms.windows_aggregator_grid_multitask import GridSamplesAggregator
 from niftynet.engine.windows_aggregator_resize import ResizeSamplesAggregator
 from niftynet.io.image_reader import ImageReader
 from niftynet.contrib.csv_reader.csv_reader import CSVReader
@@ -35,7 +36,8 @@ from niftynet.layer.rand_rotation import RandomRotationLayer
 from niftynet.layer.rand_spatial_scaling import RandomSpatialScalingLayer
 from niftynet.evaluation.segmentation_evaluator import SegmentationEvaluator
 from niftynet.layer.rand_elastic_deform import RandomElasticDeformationLayer
-from niftynet.contrib.pimms.multitask_hemis_3D import MultitaskHeMIS3D
+from niftynet.contrib.pimms.multitask_hemis_3D_shared_weights import MultitaskHeMIS3D
+# from niftynet.contrib.pimms.multitask_hemis_3D_unet import MultitaskHeMIS3D
 
 SUPPORTED_INPUT = set(['image', 'label', 'modality_label', 'weight', 'sampler', 'inferred'])
 
@@ -227,7 +229,7 @@ class SegmentationApplication(BaseApplication):
         self.sampler = [[WeightedSampler(
             reader=self.readers[0],
             csv_reader=self.csv_readers[0],
-            mode=mode,
+            mode=None,
             window_sizes=self.data_param,
             batch_size=self.net_param.batch_size,
             windows_per_image=self.action_param.sample_per_volume,
@@ -244,12 +246,12 @@ class SegmentationApplication(BaseApplication):
             ) if self.action_param.do_whole_volume_validation else WeightedSampler(
                 reader=self.readers[0],
                 csv_reader=self.csv_readers[0],
-                mode=mode,
+                mode=None,
                 window_sizes=self.data_param,
                 batch_size=self.net_param.batch_size,
                 windows_per_image=self.action_param.sample_per_volume,
                 queue_length=self.net_param.queue_length)
-        ] for mode in ['Tumour', 'Lesion']]
+        ]]
 
     def initialise_resize_sampler(self):
         self.sampler = [[ResizeSampler(
@@ -285,12 +287,27 @@ class SegmentationApplication(BaseApplication):
             self.readers]]
 
     def initialise_grid_aggregator(self):
-        self.output_decoder = GridSamplesAggregator(
+        self.output_decoder_lesion = GridSamplesAggregator(
             image_reader=self.readers[0],
             output_path=self.action_param.save_seg_dir,
             window_border=self.action_param.border,
             interp_order=self.action_param.output_interp_order,
-            postfix=self.action_param.output_postfix)
+            postfix='_lesion_niftynet_out'
+        )
+        self.output_decoder_tumour = GridSamplesAggregator(
+            image_reader=self.readers[0],
+            output_path=self.action_param.save_seg_dir,
+            window_border=self.action_param.border,
+            interp_order=self.action_param.output_interp_order,
+            postfix='_tumour_niftynet_out'
+        )
+        self.output_decoder_parcellation = GridSamplesAggregator(
+            image_reader=self.readers[0],
+            output_path=self.action_param.save_seg_dir,
+            window_border=self.action_param.border,
+            interp_order=self.action_param.output_interp_order,
+            postfix='_parcellation_niftynet_out'
+        )
 
     def initialise_resize_aggregator(self):
         self.output_decoder = ResizeSamplesAggregator(
@@ -338,50 +355,22 @@ class SegmentationApplication(BaseApplication):
                                  outputs_collector=None,
                                  gradients_collector=None):
 
-        def switch_sampler(for_training, use_dataset_a):
-            print(f'for_training={for_training}, use_dataset_a={use_dataset_a}')
+        def switch_sampler(for_training):
             with tf.name_scope('train' if for_training else 'validation'):
-                sampler = self.get_sampler()[0 if use_dataset_a else -1][0 if for_training else -1]
+                sampler = self.get_sampler()[0][0 if for_training else -1]
                 return sampler.pop_batch_op()
         if self.is_training:
-
-            current_iter = tf.placeholder(dtype=tf.float32)
             if self.action_param.validation_every_n > 0:
-                use_dataset_a = tf.cond(tf.logical_not(self.is_validation),
-                                        lambda: switch_sampler(for_training=True, use_dataset_a=True),
-                                        lambda: switch_sampler(for_training=False, use_dataset_a=True))
-                use_dataset_b = tf.cond(tf.logical_not(self.is_validation),
-                                    lambda: switch_sampler(for_training=True, use_dataset_a=False),
-                                    lambda: switch_sampler(for_training=False, use_dataset_a=False))
-                use_dataset_a_tensor = tf.Print(self.use_dataset_a_tensor, [self.use_dataset_a_tensor])
-                data_dict = tf.cond(use_dataset_a_tensor,
-                                    lambda: use_dataset_a,
-                                    lambda: use_dataset_b)
-                if self.segmentation_param.switch_dataset_every_n > 0:
-                    data_dict2 = tf.cond(use_dataset_a_tensor,
-                                        lambda: use_dataset_b,
-                                        lambda: use_dataset_a)
+                data_dict = tf.cond(tf.logical_not(self.is_validation),
+                                    lambda: switch_sampler(for_training=True),
+                                    lambda: switch_sampler(for_training=False))
             else:
                 data_dict = switch_sampler(for_training=True)
 
             image = tf.cast(data_dict['image'], tf.float32)
             net_args = {'is_training': self.is_training}
             net_out, tumour_out, brain_parcellation, class_out, brain_parcellation_activation, _, _ = self.net(image,
-                                                                                                         **net_args)
-            if self.segmentation_param.switch_dataset_every_n > 0:
-                image2 = tf.cast(data_dict2['image'], tf.float32)
-                net_args2 = {'is_training': self.is_training}
-                _, _, _, _, brain_parcellation_activation2 = self.net(image2, **net_args2)
-                last_brain_parcellation_activation = tf.stop_gradient(brain_parcellation_activation2)
-            else:
-                last_brain_parcellation_activation = tf.placeholder(dtype=tf.float32,
-                                                                    shape=brain_parcellation_activation.shape)
-                outputs_collector.add_to_collection(
-                    var=last_brain_parcellation_activation, name='last_brain_parcellation_activation',
-                    average_over_devices=False, collection=NETWORK_OUTPUT)
-                outputs_collector.add_to_collection(
-                    var=brain_parcellation_activation, name='current_brain_parcellation_activation',
-                    average_over_devices=False, collection=NETWORK_OUTPUT)
+                                                                                                  **net_args)
 
             with tf.name_scope('Optimiser'):
                 optimiser_class = OptimiserFactory.create(
@@ -424,32 +413,26 @@ class SegmentationApplication(BaseApplication):
             brain_parcellation_loss = brain_parcellation_loss_func(
                 prediction=brain_parcellation,
                 ground_truth=data_dict.get('label', None)[..., 2],
-                weight_map=data_dict.get('label', None)[..., 1])
-
-            distillation_loss_func = LossFunctionReg(
-                loss_type='L2Loss'
-            )
-            distillation_loss = distillation_loss_func(
-                prediction=brain_parcellation_activation,
-                ground_truth=last_brain_parcellation_activation
-            )
-            distillation_loss /= 512000
+                weight_map=tf.to_float(tf.less(data_dict.get('label', None)[..., 1], 1)))#tf.to_float(tf.less(data_dict.get('label', None)[..., 1], 1)))
 
             reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+            lesion_load = tf.count_nonzero(data_dict.get('label', None)[..., 0])
             if self.net_param.decay > 0.0 and reg_losses:
                 reg_loss = tf.reduce_mean(
                     [tf.reduce_mean(reg_loss) for reg_loss in reg_losses])
-                tumour_loss = tumour_seg_loss + reg_loss + distillation_loss + lesion_seg_loss + brain_parcellation_loss
-                lesion_loss = lesion_seg_loss + brain_parcellation_loss + reg_loss + tumour_seg_loss
-                loss = tf.cond(self.use_dataset_a_tensor,
-                               true_fn=lambda: tumour_loss,
-                               false_fn=lambda: lesion_loss)
+                # tumour_loss = tumour_seg_loss + reg_loss + lesion_seg_loss
+                # lesion_loss = lesion_seg_loss + brain_parcellation_loss + reg_loss + tumour_seg_loss
+                # loss = tf.cond(is_lesion,
+                #                true_fn=lambda: tumour_loss,
+                #                false_fn=lambda: lesion_loss)
+                loss = tumour_seg_loss + lesion_seg_loss + brain_parcellation_loss + reg_loss
             else:
-                tumour_loss = tumour_seg_loss + distillation_loss + lesion_seg_loss
-                lesion_loss = lesion_seg_loss + brain_parcellation_loss + tumour_seg_loss
-                loss = tf.cond(self.use_dataset_a_tensor,
-                               true_fn=lambda: tumour_loss,
-                               false_fn=lambda: lesion_loss)
+                # tumour_loss = tumour_seg_loss + lesion_seg_loss
+                # lesion_loss = lesion_seg_loss + brain_parcellation_loss + tumour_seg_loss
+                # loss = tf.cond(is_lesion,
+                #                true_fn=lambda: tumour_loss,
+                #                false_fn=lambda: lesion_loss)
+                loss = tumour_seg_loss + lesion_seg_loss + brain_parcellation_loss
             grads = self.optimiser.compute_gradients(
                 loss, colocate_gradients_with_ops=True)
             # collecting gradients variables
@@ -461,19 +444,7 @@ class SegmentationApplication(BaseApplication):
                 return tf.round(x * multiplier) / multiplier
 
             outputs_collector.add_to_collection(
-                var=current_iter, name='current_iter',
-                average_over_devices=False, collection=NETWORK_OUTPUT)
-
-            outputs_collector.add_to_collection(
-                var=tf.to_float(self.use_dataset_a_tensor), name='is_tumour',
-                average_over_devices=False, collection=CONSOLE)
-
-            outputs_collector.add_to_collection(
                 var=my_tf_round(loss, 4), name='loss',
-                average_over_devices=False, collection=CONSOLE)
-
-            outputs_collector.add_to_collection(
-                var=my_tf_round(distillation_loss, 4), name='distillation_loss',
                 average_over_devices=False, collection=CONSOLE)
 
             outputs_collector.add_to_collection(
@@ -490,11 +461,6 @@ class SegmentationApplication(BaseApplication):
 
             outputs_collector.add_to_collection(
                 var=loss, name='loss',
-                average_over_devices=True, summary_type='scalar',
-                collection=TF_SUMMARIES)
-
-            outputs_collector.add_to_collection(
-                var=distillation_loss, name='distillation_loss',
                 average_over_devices=True, summary_type='scalar',
                 collection=TF_SUMMARIES)
 
@@ -567,7 +533,7 @@ class SegmentationApplication(BaseApplication):
             # classification probabilities or argmax classification labels
             data_dict = self.get_sampler()[0][0].pop_batch_op()
             image = tf.cast(data_dict['image'], tf.float32)
-            net_args = {'is_training': self.is_training}
+            net_args = {'is_training': True}
             net_out, tumour_out, brain_parcellation, class_out, brain_parcellation_activation, _, _ = self.net(image,
                                                                                                          **net_args)
 
@@ -602,11 +568,11 @@ class SegmentationApplication(BaseApplication):
 
     def interpret_output(self, batch_output):
         if self.is_inference:
-            end_signal_lesion = self.output_decoder.decode_batch(
+            end_signal_lesion = self.output_decoder_lesion.decode_batch(
                 batch_output['window'], batch_output['location'])
-            end_signal_parcellation =self.output_decoder.decode_batch(
+            end_signal_parcellation =self.output_decoder_parcellation.decode_batch(
                 batch_output['brain_parcellation'], batch_output['location'])
-            end_signal_tumour = self.output_decoder.decode_batch(
+            end_signal_tumour = self.output_decoder_tumour.decode_batch(
                 batch_output['tumour'], batch_output['location'])
             print(end_signal_tumour, end_signal_parcellation, end_signal_lesion)
             if all([not end_signal_lesion, not end_signal_parcellation, not end_signal_tumour]):
@@ -646,22 +612,3 @@ class SegmentationApplication(BaseApplication):
             iteration_message.data_feed_dict[self.is_validation] = False
         elif iteration_message.is_validation:
             iteration_message.data_feed_dict[self.is_validation] = True
-        if self.segmentation_param.switch_dataset_every_n > 0:
-            denominator = self.segmentation_param.switch_dataset_every_n
-            self.use_dataset_a_value = (iteration_message.current_iter//denominator) % 2 == 0
-        else:
-            self.use_dataset_a_value = iteration_message.current_iter % 2 == 0
-        iteration_message.data_feed_dict[self.use_dataset_a_tensor] = self.use_dataset_a_value
-        if iteration_message.is_training or iteration_message.is_validation:
-            iteration_message.data_feed_dict[iteration_message.ops_to_run['niftynetout']['current_iter']] = iteration_message.current_iter
-
-    def add_validation_flag(self):
-        """
-        Add a TF placeholder for switching between train/valid graphs,
-        this function sets ``self.is_validation``. ``self.is_validation``
-        can be used by applications.
-
-        :return:
-        """
-        self.is_validation = tf.placeholder_with_default(False, [], 'is_validation')
-        self.use_dataset_a_tensor = tf.placeholder_with_default(True, [], 'use_dataset_a_tensor')

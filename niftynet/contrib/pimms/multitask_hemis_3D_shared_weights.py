@@ -49,34 +49,14 @@ class MultitaskHeMIS3D(BaseNet):
         n_subj_in_batch = input_tensor.shape.as_list()[0]
         print(input_tensor.shape.as_list())
         tf.logging.info('Input tensor dims: %s' % input_tensor.shape)
-        modality_scores = []
-        for i in range(n_ims_per_subj):
-            #### Do this conditionally? #####
-            identity_output = [[1.0 if _modality == i else 0.0 for _modality in range(n_modalities)] for _ in
-                               range(n_subj_in_batch)]
-            out = tf.constant(identity_output)
-            # out = tf.check_numerics(out, message='Modality classifier outputs NaNs')
-            modality_scores.append(out)
 
-        modality_tensor = tf.expand_dims(
-            tf.expand_dims(tf.expand_dims(tf.stack(modality_scores, axis=-1), axis=2), axis=2), axis=2)
-        print('modality_tensor', modality_tensor.shape)
-        expanded_input_tensor = tf.expand_dims(input_tensor, axis=1)
-        print('expanded_input_tensor', expanded_input_tensor.shape)
-        attention_tensor = tf.reduce_sum(tf.multiply(expanded_input_tensor, modality_tensor), axis=-1)
-        print('attention_tensor', attention_tensor.shape)
-        normalization_tensor = tf.reduce_sum(modality_tensor, axis=-1)
-        print('normalization_tensor', normalization_tensor.shape)
-        attention_tensor = attention_tensor / normalization_tensor
-        attention_tensor = tf.transpose(attention_tensor, [0, 2, 3, 4, 1], name='attention_tensor')
-        print('attention_tensor', attention_tensor.shape)
         backend_outputs = []
         # Loop through each modality, compute the backend tensor of each one.
         for modality in range(n_modalities):
             _single_modality_backend_tensor = HighRes3DNetSmallBackendBlock(name='HeMISBackendBlock_' + str(modality),
                                                                 w_regularizer=self.regularizers['w'])
-            tf.logging.info('attention_tensor input: %s' % attention_tensor[..., modality])
-            _tensor = _single_modality_backend_tensor(tf.expand_dims(attention_tensor[..., modality], -1), is_training)
+            tf.logging.info('attention_tensor input: %s' % input_tensor[..., modality])
+            _tensor = _single_modality_backend_tensor(tf.expand_dims(input_tensor[..., modality], -1), is_training)
             tf.logging.info('Modality tensor dims: %s' % _tensor.shape)
             backend_outputs.append(_tensor)
 
@@ -89,7 +69,8 @@ class MultitaskHeMIS3D(BaseNet):
         abstraction_op = HeMISAbstractionBlock(pooling_type='average')
         abstraction_tensor = abstraction_op(full_backend_tensor, is_training)
         tf.logging.info('Abstraction output dims: %s' % abstraction_tensor.shape)
-
+        abstraction_tensor = HighRes3DNetSharedBackendBlock(name='HeMISSharedBackendBlock_',
+                                                            w_regularizer=self.regularizers['w'])(abstraction_tensor)
         lesion_segmentation_op = HighRes3dFrontendBlock(num_classes=self.num_classes,
                                              w_regularizer=self.regularizers['w'], name='LesionFrontend')
         lesion_segmentation_tensor = lesion_segmentation_op(abstraction_tensor, is_training)
@@ -104,13 +85,10 @@ class MultitaskHeMIS3D(BaseNet):
                                              w_regularizer=self.regularizers['w'], name='ParcellationFrontend')
         brain_parcellation_tensor = brain_parcellation_op(abstraction_tensor, is_training)
         brain_parcellation_activation = brain_parcellation_op(abstraction_tensor, is_training, layer_id=-2)
-        # brain_parcellation_activation = brain_parcellation_tensor
         tf.logging.info('Brain Parcellation frontend output dims: %s' % brain_parcellation_tensor.shape)
-        classification_tensor = tf.reshape(tf.transpose(tf.stack(modality_scores, axis=-1), [0, 2, 1]), shape=[n_subj_in_batch, n_ims_per_subj, n_modalities])
-        tf.logging.info('Classification tensor output dims: %s' % classification_tensor.shape)
         return lesion_segmentation_tensor,\
                tumour_segmentation_tensor,\
-               brain_parcellation_tensor, classification_tensor,\
+               brain_parcellation_tensor, None,\
                brain_parcellation_activation, tumour_segmentation_activation, lesion_segmentation_activation
 
 
@@ -143,16 +121,7 @@ class HighRes3DNetSmallBackendBlock(BaseNet):
         self.layers = [
             {'name': 'conv_0', 'n_features': 16, 'kernel_size': 3},
             {'name': 'res_1', 'n_features': 16, 'kernels': (3, 3), 'repeat': 2},
-            {'name': 'res_2', 'n_features': 32, 'kernels': (3, 3), 'repeat': 2},
-            {'name': 'res_3', 'n_features': 32, 'kernels': (3, 3), 'repeat': 2},
-            {'name': 'conv_1', 'n_features': 64, 'kernel_size': 3}]
-
-        # self.layers = [
-        #     {'name': 'conv_0', 'n_features': 16, 'kernel_size': 3},
-        #     {'name': 'res_1', 'n_features': 16, 'kernels': (3, 3), 'repeat': 1},
-        #     {'name': 'res_2', 'n_features': 32, 'kernels': (3, 3), 'repeat': 1},
-        #     {'name': 'res_3', 'n_features': 32, 'kernels': (3, 3), 'repeat': 1},
-        #     {'name': 'conv_1', 'n_features': 64, 'kernel_size': 3}]
+            {'name': 'res_2', 'n_features': 32, 'kernels': (3, 3), 'repeat': 2}]
 
     def layer_op(self, images, is_training=True, layer_id=-1, **unused_kwargs):
         assert (layer_util.check_spatial_dims(
@@ -207,8 +176,47 @@ class HighRes3DNetSmallBackendBlock(BaseNet):
                 layer_instances.append((res_block, dilated.tensor))
         flow = dilated.tensor
 
+        return tf.cond(tf.greater(tf.count_nonzero(images), 0),
+                       true_fn=lambda: flow,
+                       false_fn=lambda: tf.zeros(flow.shape))
+
+class HighRes3DNetSharedBackendBlock(BaseNet):
+    """
+    implementation of HighRes3DNet:
+
+        Li et al., "On the compactness, efficiency, and representation of 3D
+        convolutional networks: Brain parcellation as a pretext task", IPMI '17
+
+    (This is smaller model with an initial stride-2 convolution)
+    """
+
+    def __init__(self,
+                 w_initializer=None,
+                 w_regularizer=None,
+                 b_initializer=None,
+                 b_regularizer=None,
+                 acti_func='relu',
+                 name='HighRes3DNetSmall'):
+
+        super(HighRes3DNetSharedBackendBlock, self).__init__(
+            w_initializer=w_initializer,
+            w_regularizer=w_regularizer,
+            b_initializer=b_initializer,
+            b_regularizer=b_regularizer,
+            acti_func=acti_func,
+            name=name)
+
+        self.layers = [
+            {'name': 'res_3', 'n_features': 32, 'kernels': (3, 3), 'repeat': 2},
+            {'name': 'conv_1', 'n_features': 64, 'kernel_size': 3}]
+
+    def layer_op(self, flow, is_training=True, layer_id=-1, **unused_kwargs):
+        # go through self.layers, create an instance of each layer
+        # and plugin data
+        layer_instances = []
+
         ### resblocks, all kernels dilated by 4
-        params = self.layers[3]
+        params = self.layers[0]
         with DilatedTensor(flow, dilation_factor=4) as dilated:
             for j in range(params['repeat']):
                 res_block = HighResBlock(
@@ -223,7 +231,7 @@ class HighRes3DNetSmallBackendBlock(BaseNet):
         flow = dilated.tensor
 
         ### 1x1x1 convolution layer
-        params = self.layers[4]
+        params = self.layers[1]
         fc_layer = ConvolutionalLayer(
             n_output_chns=params['n_features'],
             kernel_size=params['kernel_size'],
@@ -234,9 +242,7 @@ class HighRes3DNetSmallBackendBlock(BaseNet):
         flow = fc_layer(flow, is_training, keep_prob=0.5)
         layer_instances.append((fc_layer, flow))
 
-        return tf.cond(tf.greater(tf.count_nonzero(images), 0),
-                       true_fn=lambda: flow,
-                       false_fn=lambda: tf.zeros(flow.shape))
+        return flow
 
 
 class HeMISAbstractionBlock(TrainableLayer):

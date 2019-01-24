@@ -30,12 +30,22 @@ class ApplyDistillationLoss(object):
         """
         _iter_msg = msg['iter_msg']
         ops_to_run = sender.outputs_collector.variables(NETWORK_OUTPUT)
-        if _iter_msg.current_iter > 2 and self.last_output is not None:
+        if _iter_msg.current_iter > 100 and self.last_output is not None:
             _iter_msg.data_feed_dict[ops_to_run['last_brain_parcellation_activation']] =\
                 self.last_output['current_brain_parcellation_activation']
+            _iter_msg.data_feed_dict[ops_to_run['last_lesion_segmentation_activation']] = \
+                self.last_output['current_lesion_segmentation_activation']
+            _iter_msg.data_feed_dict[ops_to_run['last_tumour_segmentation_activation']] = \
+                self.last_output['current_tumour_segmentation_activation']
         else:
             _iter_msg.data_feed_dict[ops_to_run['last_brain_parcellation_activation']] =\
                 np.zeros(shape=ops_to_run['last_brain_parcellation_activation'].shape.as_list(),
+                         dtype=np.float)
+            _iter_msg.data_feed_dict[ops_to_run['last_lesion_segmentation_activation']] = \
+                np.zeros(shape=ops_to_run['last_lesion_segmentation_activation'].shape.as_list(),
+                         dtype=np.float)
+            _iter_msg.data_feed_dict[ops_to_run['last_tumour_segmentation_activation']] = \
+                np.zeros(shape=ops_to_run['last_tumour_segmentation_activation'].shape.as_list(),
                          dtype=np.float)
 
     def gather_outputs(self, _sender, **msg):
@@ -52,4 +62,4 @@ class ApplyDistillationLoss(object):
         :return:
         """
         _iter_msg = msg['iter_msg']
-        self.last_output = _iter_msg.current_iter_output[NETWORK_OUTPUT]
+        self.last_output[_iter_msg.current_iter] = _iter_msg.current_iter_output[NETWORK_OUTPUT]

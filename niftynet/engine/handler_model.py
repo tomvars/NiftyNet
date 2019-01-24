@@ -7,6 +7,7 @@ import os
 import tensorflow as tf
 
 from niftynet.engine.application_variables import global_vars_init_or_restore
+from tensorflow.contrib.framework.python.framework import checkpoint_utils
 from niftynet.engine.signal import \
     ITER_FINISHED, SESS_FINISHED, SESS_STARTED
 from niftynet.io.misc_io import touch_folder
@@ -70,9 +71,31 @@ class ModelRestorer(object):
         tf.logging.info('starting from iter %d', self.initial_iter)
         checkpoint = '{}-{}'.format(self.file_name_prefix, self.initial_iter)
         tf.logging.info('Accessing %s', checkpoint)
+        all_variables = tf.get_collection_ref(tf.GraphKeys.GLOBAL_VARIABLES)
+        omit_restore = ['Adam']
+        var_list = [v for v in all_variables]
+        var_list_fin = [v for v in var_list if len([f for f in list(
+            omit_restore) if f in v.name]) == 0]
+        print('len(var_list_fin)', len(var_list_fin))
+        print('len(var_list)', len(var_list))
+        all_ckpt_var = checkpoint_utils.list_variables(checkpoint)
+        all_names = [c[0] for c in all_ckpt_var]
         try:
-            saver = tf.train.Saver(save_relative_paths=True)
+            var_list_fin2 = [v for v in var_list_fin if v.name[:-2] in
+                             all_names]
+            saver = tf.train.Saver(save_relative_paths=True,
+                                   var_list=var_list_fin2)
             saver.restore(tf.get_default_session(), checkpoint)
+            var_list_fin2_names = [v.name for v in var_list_fin2]
+            v_to_init2 = [v for v in all_variables if v.name not in
+                          var_list_fin2_names]
+            for v in v_to_init2:
+                print("Initialising ", v.name)
+            init_others = tf.variables_initializer(
+                v_to_init2)
+            tf.get_default_session().run(init_others)
+            print("Restored model")
+
         except tf.errors.NotFoundError:
             tf.logging.fatal(
                 'checkpoint %s not found or variables to restore do not '

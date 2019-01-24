@@ -19,21 +19,46 @@ class BNLayer(TrainableLayer):
 
     def __init__(self,
                  regularizer=None,
-                 moving_decay=0.9,
+                 moving_decay=0.99,
                  eps=1e-5,
                  name='batch_norm'):
         super(BNLayer, self).__init__(name=name)
         self.eps = eps
         self.moving_decay = moving_decay
-
         self.initializers = {'beta': tf.constant_initializer(0.0),
                              'gamma': tf.constant_initializer(1.0),
                              'moving_mean': tf.constant_initializer(0.0),
                              'moving_variance': tf.constant_initializer(1.0)}
-
         self.regularizers = {'beta': regularizer, 'gamma': regularizer}
 
     def layer_op(self, inputs, is_training, use_local_stats=False):
+        return tf.layers.batch_normalization(
+            inputs,
+            axis=-1,
+            momentum=self.moving_decay,
+            epsilon=self.eps,
+            center=True,
+            scale=True,
+            beta_initializer=self.initializers['beta'],
+            gamma_initializer=self.initializers['gamma'],
+            moving_mean_initializer=self.initializers['moving_mean'],
+            moving_variance_initializer=self.initializers['moving_variance'],
+            beta_regularizer=self.regularizers['beta'],
+            gamma_regularizer=self.regularizers['gamma'],
+            beta_constraint=None,
+            gamma_constraint=None,
+            training=is_training or use_local_stats,
+            trainable=True,
+            name='batch_norm',
+            reuse=None,
+            renorm=False,
+            renorm_clipping=None,
+            renorm_momentum=0.99,
+            fused=None,
+            virtual_batch_size=None,
+            adjustment=None
+        )
+
         # input_shape = inputs.shape
         #
         # # operates on all dims except the last dim
@@ -77,6 +102,8 @@ class BNLayer(TrainableLayer):
         #
         # # call the normalisation function
         # if is_training or use_local_stats:
+        #     # with tf.control_dependencies(
+        #     #         [update_moving_mean, update_moving_variance]):
         #     outputs = tf.nn.batch_normalization(
         #         inputs, mean, variance,
         #         beta, gamma, self.eps, name='batch_norm')
@@ -87,34 +114,7 @@ class BNLayer(TrainableLayer):
         # outputs.set_shape(inputs.get_shape())
         # return outputs
 
-        return tf.layers.batch_normalization(
-            inputs,
-            axis=-1,
-            momentum=self.moving_decay,
-            epsilon=self.eps,
-            center=True,
-            scale=True,
-            beta_initializer=self.initializers['beta'],
-            gamma_initializer=self.initializers['gamma'],
-            moving_mean_initializer=self.initializers['moving_mean'],
-            moving_variance_initializer=self.initializers['moving_variance'],
-            beta_regularizer=self.regularizers['beta'],
-            gamma_regularizer=self.regularizers['gamma'],
-            beta_constraint=None,
-            gamma_constraint=None,
-            training=False,
-            trainable=is_training or use_local_stats,
-            name='batch_norm',
-            reuse=None,
-            renorm=False,
-            renorm_clipping=None,
-            renorm_momentum=0.99,
-            fused=None,
-            virtual_batch_size=None,
-            adjustment=None
-        )
-
-        # # # Regularizers are not currently supported for fused batch norm.
+        # # Regularizers are not currently supported for fused batch norm.
         # return tf.contrib.layers.batch_norm(
         #     inputs,
         #     decay=self.moving_decay,
@@ -124,7 +124,7 @@ class BNLayer(TrainableLayer):
         #     activation_fn=None,
         #     param_initializers=self.initializers,
         #     param_regularizers=self.regularizers,
-        #     updates_collections=None,
+        #     updates_collections=tf.GraphKeys.UPDATE_OPS,
         #     is_training=is_training,
         #     reuse=None,
         #     variables_collections=[tf.GraphKeys.MOVING_AVERAGE_VARIABLES,
@@ -136,3 +136,30 @@ class BNLayer(TrainableLayer):
         #     data_format='NHWC',
         #     zero_debias_moving_mean=False,
         #     scope=None)
+
+
+class InstanceNormLayer(TrainableLayer):
+    """
+    Instance normalisation layer, wrapper of `tf.contrib.layers.instance_norm`.
+    """
+
+    def __init__(self, eps=1e-6, gamma_initializer=None, name='instance_norm'):
+        TrainableLayer.__init__(self, name=name)
+        self.eps = eps
+        self.gamma_initializer = gamma_initializer
+
+    def layer_op(self, inputs, is_training=None):
+        if self.gamma_initializer is None:
+            self.gamma_initializer = tf.constant_initializer(1.0)
+        return tf.contrib.layers.instance_norm(
+            inputs,
+            center=True,
+            scale=True,
+            epsilon=self.eps,
+            param_initializers={'gamma': self.gamma_initializer},
+            reuse=None,
+            variables_collections=None,
+            outputs_collections=None,
+            trainable=True,
+            data_format='NHWC',
+            scope=None)

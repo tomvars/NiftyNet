@@ -8,6 +8,7 @@ from niftynet.layer.deconvolution import DeconvolutionalLayer
 from niftynet.layer.downsample import DownSampleLayer
 from niftynet.layer.elementwise import ElementwiseLayer
 from niftynet.layer.crop import CropLayer
+from niftynet.layer.linear_resize import LinearResizeLayer
 from niftynet.utilities.util_common import look_up_operations
 
 
@@ -24,11 +25,11 @@ class UNet3D(TrainableLayer):
                  w_regularizer=None,
                  b_initializer=None,
                  b_regularizer=None,
-                 acti_func='prelu',
+                 acti_func='leakyrelu',
                  name='UNet'):
         super(UNet3D, self).__init__(name=name)
 
-        self.n_features = [32, 64, 128, 256, 512]
+        self.n_features = [30, 60, 120, 240, 480]
         self.acti_func = acti_func
         self.num_classes = num_classes
 
@@ -39,8 +40,8 @@ class UNet3D(TrainableLayer):
 
     def layer_op(self, images, is_training=True, layer_id=-1, **unused_kwargs):
         # image_size  should be divisible by 8
-        assert layer_util.check_spatial_dims(images, lambda x: x % 8 == 0)
-        assert layer_util.check_spatial_dims(images, lambda x: x >= 89)
+        assert layer_util.check_spatial_dims(images, lambda x: (x - 4) % 8 == 0)
+        # assert layer_util.check_spatial_dims(images, lambda x: x >= 89)
         block_layer = UNetBlock('DOWNSAMPLE',
                                 (self.n_features[0], self.n_features[1]),
                                 (3, 3), with_downsample_branch=True,
@@ -88,6 +89,8 @@ class UNet3D(TrainableLayer):
                                 w_regularizer=self.regularizers['w'],
                                 acti_func=self.acti_func,
                                 name='R3')
+
+        conv_3 = CropLayer(4)(conv_3)
         concat_3 = ElementwiseLayer('CONCAT')(conv_3, up_3)
         up_2, _ = block_layer(concat_3, is_training)
         print(block_layer)
@@ -99,6 +102,7 @@ class UNet3D(TrainableLayer):
                                 w_regularizer=self.regularizers['w'],
                                 acti_func=self.acti_func,
                                 name='R2')
+        conv_2 = CropLayer(16)(conv_2)
         concat_2 = ElementwiseLayer('CONCAT')(conv_2, up_2)
         up_1, _ = block_layer(concat_2, is_training)
         print(block_layer)
@@ -113,13 +117,12 @@ class UNet3D(TrainableLayer):
                                 w_regularizer=self.regularizers['w'],
                                 acti_func=self.acti_func,
                                 name='R1_FC')
+
+        conv_1 = CropLayer(40)(conv_1)
         concat_1 = ElementwiseLayer('CONCAT')(conv_1, up_1)
 
         # for the last layer, upsampling path is not used
         _, output_tensor = block_layer(concat_1, is_training)
-
-        crop_layer = CropLayer(border=44, name='crop-88')
-        output_tensor = crop_layer(output_tensor)
         print(block_layer)
         return output_tensor
 
@@ -158,7 +161,10 @@ class UNetBlock(TrainableLayer):
                                          w_initializer=self.initializers['w'],
                                          w_regularizer=self.regularizers['w'],
                                          acti_func=self.acti_func,
-                                         name='{}'.format(n_features))
+                                         name='{}'.format(n_features),
+                                         featnorm_type='batch',
+                                         moving_decay=0.99,
+                                         padding="VALID")
             output_tensor = conv_op(output_tensor, is_training)
 
         if self.with_downsample_branch:
@@ -172,12 +178,28 @@ class UNetBlock(TrainableLayer):
                                             stride=2,
                                             name='down_2x2')
             output_tensor = downsample_op(output_tensor)
+
         elif self.func == 'UPSAMPLE':
-            upsample_op = DeconvolutionalLayer(n_output_chns=self.n_chns[-1],
-                                               kernel_size=2,
-                                               stride=2,
-                                               name='up_2x2')
-            output_tensor = upsample_op(output_tensor, is_training)
+            up_shape = [2 * int(output_tensor.shape[i]) for i in (1, 2, 3)]
+            upsample_op = LinearResizeLayer(up_shape)
+            output_tensor = upsample_op(output_tensor)
         elif self.func == 'NONE':
             pass  # do nothing
         return output_tensor, branch_output
+
+
+if __name__ == "__main__":
+    import os
+    import tensorflow as tf
+
+    import sys
+
+    sys.path.append('../../')
+    import numpy as np
+
+    img = np.random.random([1, 132, 132, 116, 2])
+    tf_img = tf.constant(img, dtype=tf.float32)
+
+    sess = tf.InteractiveSession()
+    unet = UNet3D(img.shape[-1])
+    unet.layer_op(tf_img)

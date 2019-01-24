@@ -253,36 +253,36 @@ def dice_plus_xent_loss(prediction, ground_truth, weight_map=None):
     """
     Function to calculate the loss used in https://arxiv.org/pdf/1809.10486.pdf,
     no-new net, Isenseee et al (used to win the Medical Imaging Decathlon).
-
     It is the sum of the cross-entropy and the Dice-loss.
-
     :param prediction: the logits
     :param ground_truth: the segmentation ground truth
     :param weight_map:
     :return: the loss (cross_entropy + Dice)
-
     """
-    if weight_map is not None:
-        raise NotImplementedError
+    num_classes = tf.shape(prediction)[-1]
 
     prediction = tf.cast(prediction, tf.float32)
-    loss_xent = cross_entropy(prediction, ground_truth)
-
-    softmax_of_logits = tf.nn.softmax(prediction, axis=-1)
+    loss_xent = cross_entropy(prediction, ground_truth, weight_map=weight_map)
 
     # Dice as according to the paper:
-    num_classes = tf.shape(prediction)[-1]
     one_hot = labels_to_one_hot(ground_truth, num_classes=num_classes)
+    softmax_of_logits = tf.nn.softmax(prediction)
 
-    dice_numerator = 2.0 * tf.sparse_reduce_sum(one_hot * softmax_of_logits,
-                                                reduction_axes=[0])
-    dice_denominator = tf.reduce_sum(softmax_of_logits, reduction_indices=[0]) + \
-                       tf.sparse_reduce_sum(one_hot, reduction_axes=[0])
+    if weight_map is not None:
+        weight_map_nclasses = tf.tile(tf.expand_dims(tf.reshape(weight_map, [-1]), 1), [1, num_classes])
+        dice_numerator = 2.0 * tf.sparse_reduce_sum(weight_map_nclasses * one_hot * softmax_of_logits,
+                                                    reduction_axes=[0])
+        dice_denominator = tf.reduce_sum(weight_map_nclasses * softmax_of_logits,
+                                         reduction_indices=[0]) + \
+                           tf.sparse_reduce_sum(one_hot * weight_map_nclasses, reduction_axes=[0])
+
+    else:
+        dice_numerator = 2.0 * tf.sparse_reduce_sum(one_hot * softmax_of_logits, reduction_axes=[0])
+        dice_denominator = tf.reduce_sum(softmax_of_logits, reduction_indices=[0]) + \
+                           tf.sparse_reduce_sum(one_hot, reduction_axes=[0])
 
     epsilon = 0.00001
-
     loss_dice = -(dice_numerator + epsilon) / (dice_denominator + epsilon)
-
     return loss_dice + loss_xent
 
 
@@ -628,3 +628,38 @@ def dice_dense_nosquare(prediction, ground_truth, weight_map=None):
 
     dice_score = (dice_numerator + epsilon) / (dice_denominator + epsilon)
     return 1.0 - tf.reduce_mean(dice_score)
+
+
+def dice_plus_xent_loss_top_k(prediction, ground_truth, weight_map=None, k_percentage=5):
+    """
+    Function to calculate the loss used in https://arxiv.org/pdf/1809.10486.pdf,
+    no-new net, Isenseee et al (used to win the Medical Imaging Decathlon).
+
+    It is the sum of the cross-entropy and the Dice-loss.
+
+    :param prediction: the logits
+    :param ground_truth: the segmentation ground truth
+    :param weight_map:
+    :return: the loss (cross_entropy + Dice)
+
+    """
+    if weight_map is not None:
+        raise NotImplementedError
+    prediction = tf.cast(prediction, tf.float32)
+    entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=prediction, labels=tf.to_int32(ground_truth))
+    # constant proportion of the voxels
+    k = entropy.get_shape()[-1] * k_percentage // 100
+    _, top_k_indices = tf.nn.top_k(entropy, k=k)
+    prediction, ground_truth = [tf.gather(x, top_k_indices) for x in (prediction, ground_truth)]
+    loss_xent = cross_entropy(prediction, ground_truth)
+    softmax_of_logits = tf.nn.softmax(prediction, axis=-1)
+    # Dice as according to the paper:
+    num_classes = tf.shape(prediction)[-1]
+    one_hot = labels_to_one_hot(ground_truth, num_classes=num_classes)
+    dice_numerator = 2.0 * tf.sparse_reduce_sum(one_hot * softmax_of_logits, reduction_axes=[0])
+    dice_denominator = tf.reduce_sum(softmax_of_logits, reduction_indices=[0]) + \
+                       tf.sparse_reduce_sum(one_hot, reduction_axes=[0])
+    epsilon = 0.00001
+    loss_dice = -(dice_numerator + epsilon) / (dice_denominator + epsilon)
+
+    return loss_dice + loss_xent

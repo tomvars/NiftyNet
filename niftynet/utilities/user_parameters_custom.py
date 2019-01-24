@@ -121,6 +121,13 @@ def __add_segmentation_args(parser):
         default=[])
 
     parser.add_argument(
+        "--switch_dataset_every_n",
+        metavar='',
+        help="How to permute the indices, only used for BAD inference",
+        type=int,
+        default=-1)
+
+    parser.add_argument(
         "--softmax",
         metavar='',
         help="[Training only] whether to append a softmax layer to network "
