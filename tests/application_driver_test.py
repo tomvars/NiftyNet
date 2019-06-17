@@ -14,29 +14,13 @@ from niftynet.io.misc_io import set_logger
 from niftynet.utilities.util_common import ParserNamespace
 from niftynet.engine.signal import SESS_FINISHED, SESS_STARTED
 
-
-# def _run_test_application():
-#    test_driver = get_initialised_driver()
-#    test_driver.run_application()
-#    return
-
-
-def get_initialised_driver(starting_iter=0,
-                           model_dir_rand=True,
-                           vars_to_restore='',
-                           application='tests.toy_application.ToyApplication'):
-    if model_dir_rand:
-        model_dir = os.path.join('.', 'testing_data', 'tmp', str(uuid.uuid4()))
-        os.makedirs(model_dir)
-    else:
-        model_dir = os.path.join('.', 'testing_data')
-    system_param = {
+SYSTEM_PARAM = {
         'SYSTEM': ParserNamespace(
             action='train',
             num_threads=2,
             num_gpus=4,
             cuda_devices='6',
-            model_dir=model_dir,
+            model_dir=None,
             dataset_split_file=os.path.join(
                 '.', 'testing_data', 'testtoyapp.csv'),
             event_handler=[
@@ -48,7 +32,7 @@ def get_initialised_driver(starting_iter=0,
             batch_size=20,
             name='tests.toy_application.TinyNet'),
         'TRAINING': ParserNamespace(
-            starting_iter=starting_iter,
+            starting_iter=0,
             max_iter=500,
             save_every_n=20,
             tensorboard_every_n=1,
@@ -57,15 +41,31 @@ def get_initialised_driver(starting_iter=0,
             validation_every_n=-1,
             exclude_fraction_for_validation=0.1,
             exclude_fraction_for_inference=0.1,
-            vars_to_restore=vars_to_restore,
+            vars_to_restore='',
             patience=100,
             lr=0.01),
         'CUSTOM': ParserNamespace(
             vector_size=100,
             mean=10.0,
             stddev=2.0,
-            name=application)
+            name='tests.toy_application.ToyApplication')
     }
+
+
+def get_initialised_driver(starting_iter=0,
+                           model_dir_rand=True,
+                           vars_to_restore='',
+                           application='tests.toy_application.ToyApplication',
+                           system_param=SYSTEM_PARAM):
+    if model_dir_rand:
+        model_dir = os.path.join('.', 'testing_data', 'tmp', str(uuid.uuid4()))
+        os.makedirs(model_dir)
+    else:
+        model_dir = os.path.join('.', 'testing_data')
+    SYSTEM_PARAM['SYSTEM'].model_dir = model_dir
+    SYSTEM_PARAM['TRAINING'].starting_iter = starting_iter
+    SYSTEM_PARAM['TRAINING'].vars_to_restore = vars_to_restore
+    SYSTEM_PARAM['CUSTOM'].name = application
     app_driver = ApplicationDriver()
     app_driver.initialise_application(system_param, {})
     # set parameters without __init__
