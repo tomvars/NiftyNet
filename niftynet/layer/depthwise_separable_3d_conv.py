@@ -1,16 +1,18 @@
 # -*- coding: utf-8 -*-
 
-'''
+"""
 This is a modification of the SeparableConv3D code in Keras,
 to perform just the Depthwise Convolution (1st step) of the
 Depthwise Separable Convolution layer.
-'''
+"""
+
 from __future__ import absolute_import
 
 import tensorflow as tf
 import numpy as np
 
 from niftynet.layer.base_layer import TrainableLayer
+
 
 def default_w_initializer():
     def _initializer(shape, dtype, partition_info):
@@ -22,21 +24,20 @@ def default_w_initializer():
 
     return _initializer
 
+
 def default_b_initializer():
     return tf.constant_initializer(0.0)
 
+
 def preprocess_padding(padding):
-    if padding == 'same':
-        padding = 'SAME'
-    elif padding == 'valid':
-        padding = 'VALID'
+    if padding.lower() in ('same', 'valid'):
+        padding = padding.upper()
     else:
         raise ValueError('Invalid border mode:', padding)
     return padding
 
 
-def conv_output_length(input_length, filter_size,
-                       padding, stride, dilation=1):
+def conv_output_length(input_length, filter_size, padding, stride, dilation=1):
     """Determines output length of a convolution given input length.
 
     # Arguments
@@ -51,7 +52,6 @@ def conv_output_length(input_length, filter_size,
     """
     if input_length is None:
         return None
-    assert padding in {'same', 'valid', 'full', 'causal'}
     dilated_filter_size = filter_size + (filter_size - 1) * (dilation - 1)
     if padding == 'same':
         output_length = input_length
@@ -61,6 +61,8 @@ def conv_output_length(input_length, filter_size,
         output_length = input_length
     elif padding == 'full':
         output_length = input_length + dilated_filter_size - 1
+    else:
+        raise ValueError("Please ensure padding is one of 'same', 'valid', 'full', 'causal'")
     return (output_length + stride - 1) // stride
 
 
@@ -141,7 +143,7 @@ class DepthwiseConv3D(TrainableLayer):
                  strides=(1, 1, 1),
                  padding='same',
                  depth_multiplier=1,
-                 data_format=None,
+                 data_format='channels_last',
                  activation=None,
                  use_bias=True,
                  depthwise_initializer='glorot_uniform',
@@ -156,6 +158,11 @@ class DepthwiseConv3D(TrainableLayer):
                  b_regularizer=None,
                  name='depthwise_separable_conv3d',
                  **kwargs):
+
+        super(DepthwiseConv3D, self).__init__(name=name)
+        if type(kernel_size) is int:
+            kernel_size = [kernel_size] * 3
+
         self.kernel_size = kernel_size
         self.strides = strides
         self.padding = padding
@@ -175,7 +182,7 @@ class DepthwiseConv3D(TrainableLayer):
         self.dilation_rate = dilation_rate
         self._padding = preprocess_padding(self.padding)
         self._strides = (1,) + self.strides + (1,)
-        self._data_format = "NDHWC"
+        self._data_format = "NDHWC"  # todo -- why is this used twice?
         self._op = tf.make_template(name, self.layer_op, create_scope_now_=True)
 
     def layer_op(self, inputs, is_training):
@@ -206,10 +213,10 @@ class DepthwiseConv3D(TrainableLayer):
             dilation = self.dilation_rate + (1,) + (1,)
 
         outputs = tf.convert_to_tensor(
-                        [tf.nn.conv3d(inp_c, depthwise_kernel, strides=self._strides,
-                                      padding=self._padding, dilations=dilation,
-                                      data_format=self._data_format)
-                         for inp_c in channels_l])
+            [tf.nn.conv3d(inp_c, depthwise_kernel, strides=self._strides,
+                          padding=self._padding, dilations=dilation,
+                          data_format=self._data_format)
+             for inp_c in channels_l])
 
         # Add original channels dim at the end of the tensor
         outputs = tf.transpose(outputs, (1, 2, 3, 4, 5, 0))
@@ -242,32 +249,19 @@ class DepthwiseConv3D(TrainableLayer):
 
     def compute_output_shape(self, input_shape):
         if self.data_format == 'channels_first':
-            depth = input_shape[2]
-            rows = input_shape[3]
-            cols = input_shape[4]
+            depth, rows, cols = input_shape[2:5]
             out_filters = input_shape[1] * self.depth_multiplier
-        elif self.data_format == 'channels_last':
-            depth = input_shape[1]
-            rows = input_shape[2]
-            cols = input_shape[3]
+        else:
+            depth, rows, cols = input_shape[1:4]
             out_filters = input_shape[4] * self.depth_multiplier
 
-        depth = conv_output_length(depth, self.kernel_size[0],
-                                   self.padding,
-                                   self.strides[0])
-
-        rows = conv_output_length(rows, self.kernel_size[1],
-                                  self.padding,
-                                  self.strides[1])
-
-        cols = conv_output_length(cols, self.kernel_size[2],
-                                  self.padding,
-                                  self.strides[2])
+        depth = conv_output_length(depth, self.kernel_size[0], self.padding, self.strides[0])
+        rows = conv_output_length(rows, self.kernel_size[1], self.padding, self.strides[1])
+        cols = conv_output_length(cols, self.kernel_size[2], self.padding, self.strides[2])
 
         if self.data_format == 'channels_first':
             return input_shape[0], out_filters, depth, rows, cols
-
-        elif self.data_format == 'channels_last':
+        else:
             return input_shape[0], depth, rows, cols, out_filters
 
     def get_config(self):
@@ -281,5 +275,3 @@ class DepthwiseConv3D(TrainableLayer):
         config['depthwise_regularizer'] = tf.keras.regularizers.serialize(self.depthwise_regularizer)
         config['depthwise_constraint'] = tf.keras.constraints.serialize(self.depthwise_constraint)
         return config
-
-DepthwiseConvolution3D = DepthwiseConv3D
