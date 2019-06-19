@@ -90,16 +90,6 @@ class DepthwiseConv3D(TrainableLayer):
             for each input channel.
             The total number of depthwise convolution output
             channels will be equal to `filterss_in * depth_multiplier`.
-        data_format: A string,
-            one of `channels_last` (default) or `channels_first`.
-            The ordering of the dimensions in the inputs.
-            `channels_last` corresponds to inputs with shape
-            `(batch, height, width, channels)` while `channels_first`
-            corresponds to inputs with shape
-            `(batch, channels, height, width)`.
-            It defaults to the `image_data_format` value found in your
-            Keras config file at `~/.keras/keras.json`.
-            If you never set it, then it will be "channels_last".
         activation: Activation function to use
             (see [activations](../activations.md)).
             If you don't specify anything, no activation is applied
@@ -127,9 +117,7 @@ class DepthwiseConv3D(TrainableLayer):
             (see [constraints](../constraints.md)).
     # Input shape
         5D tensor with shape:
-        `(batch, depth, channels, rows, cols)` if data_format='channels_first'
-        or 5D tensor with shape:
-        `(batch, depth, rows, cols, channels)` if data_format='channels_last'.
+        `(batch, depth, rows, cols, channels)` .
     # Output shape
         5D tensor with shape:
         `(batch, filters * depth, new_depth, new_rows, new_cols)` if data_format='channels_first'
@@ -143,7 +131,6 @@ class DepthwiseConv3D(TrainableLayer):
                  strides=(1, 1, 1),
                  padding='same',
                  depth_multiplier=1,
-                 data_format='channels_last',
                  activation=None,
                  use_bias=True,
                  depthwise_initializer='glorot_uniform',
@@ -156,17 +143,16 @@ class DepthwiseConv3D(TrainableLayer):
                  w_regularizer=None,
                  b_initializer=None,
                  b_regularizer=None,
-                 name='depthwise_separable_conv3d',
+                 name='depthwise_conv3d',
                  **kwargs):
 
-        super(DepthwiseConv3D, self).__init__(name=name)
+        super().__init__(name=name)
         if type(kernel_size) is int:
-            kernel_size = [kernel_size] * 3
+            kernel_size = (kernel_size,) * 3
 
         self.kernel_size = kernel_size
         self.strides = strides
         self.padding = padding
-        self.data_format = data_format
         self.dilation_rate = dilation_rate
         self.activation = activation
         self.depth_multiplier = depth_multiplier
@@ -182,14 +168,14 @@ class DepthwiseConv3D(TrainableLayer):
         self.dilation_rate = dilation_rate
         self._padding = preprocess_padding(self.padding)
         self._strides = (1,) + self.strides + (1,)
-        self._data_format = "NDHWC"  # todo -- why is this used twice?
+        self._data_format = "NDHWC"
         self._op = tf.make_template(name, self.layer_op, create_scope_now_=True)
 
     def layer_op(self, inputs, is_training):
         depthwise_kernel_shape = (self.kernel_size[0],
                                   self.kernel_size[1],
                                   self.kernel_size[2],
-                                  1,
+                                  1,  # used on split channels
                                   self.depth_multiplier)
 
         depthwise_kernel = tf.get_variable(
@@ -200,17 +186,10 @@ class DepthwiseConv3D(TrainableLayer):
 
         if inputs.dtype == 'float64':
             inputs = tf.cast(inputs, 'float32')
-        if self.data_format == 'channels_first':
-            inputs = tf.transpose(inputs, (0, 2, 3, 4, 1))
 
-        if self.data_format == 'channels_last':
-            b, d, h, w, c = inputs.shape
-            channels_l = [tf.expand_dims(inputs[:, :, :, :, i], -1) for i in range(0, c)]
-            dilation = (1,) + self.dilation_rate + (1,)
-        else:
-            b, c, d, h, w = inputs.shape
-            channels_l = [tf.expand_dims(inputs[:, i, :, :, :], 1) for i in range(0, c)]
-            dilation = self.dilation_rate + (1,) + (1,)
+        b, d, h, w, c = inputs.shape
+        channels_l = [tf.expand_dims(inputs[:, :, :, :, i], -1) for i in range(0, c)]
+        dilation = (1,) + self.dilation_rate + (1,)
 
         outputs = tf.convert_to_tensor(
             [tf.nn.conv3d(inp_c, depthwise_kernel, strides=self._strides,
@@ -248,30 +227,123 @@ class DepthwiseConv3D(TrainableLayer):
         return out_str
 
     def compute_output_shape(self, input_shape):
-        if self.data_format == 'channels_first':
-            depth, rows, cols = input_shape[2:5]
-            out_filters = input_shape[1] * self.depth_multiplier
-        else:
-            depth, rows, cols = input_shape[1:4]
-            out_filters = input_shape[4] * self.depth_multiplier
+        depth, rows, cols = input_shape[1:4]
+        out_filters = input_shape[4] * self.depth_multiplier
 
         depth = conv_output_length(depth, self.kernel_size[0], self.padding, self.strides[0])
         rows = conv_output_length(rows, self.kernel_size[1], self.padding, self.strides[1])
         cols = conv_output_length(cols, self.kernel_size[2], self.padding, self.strides[2])
 
-        if self.data_format == 'channels_first':
-            return input_shape[0], out_filters, depth, rows, cols
-        else:
-            return input_shape[0], depth, rows, cols, out_filters
+        return input_shape[0], depth, rows, cols, out_filters
 
-    def get_config(self):
-        config = super(DepthwiseConv3D, self).get_config()
-        config.pop('filters')
-        config.pop('kernel_initializer')
-        config.pop('kernel_regularizer')
-        config.pop('kernel_constraint')
-        config['depth_multiplier'] = self.depth_multiplier
-        config['depthwise_initializer'] = tf.keras.initializers.serialize(self.depthwise_initializer)
-        config['depthwise_regularizer'] = tf.keras.regularizers.serialize(self.depthwise_regularizer)
-        config['depthwise_constraint'] = tf.keras.constraints.serialize(self.depthwise_constraint)
-        return config
+
+class SeparableConv3D(DepthwiseConv3D):
+    """
+    Separable convolutions consist of first performing
+    a depthwise spatial convolution
+    (which acts on each input channel separately)
+    followed by a pointwise convolution which mixes together the resulting
+    output channels. The `depth_multiplier` argument controls how many
+    output channels are generated per input channel in the depthwise step.
+    Intuitively, separable convolutions can be understood as
+    a way to factorize a convolution kernel into two smaller kernels,
+    or as an extreme version of an Inception block.
+
+    see DepthwiseConv3D for docstrings except for:
+
+    :param
+    filters: number of output filters for the convolution to result in.
+
+    """
+
+    def __init__(self, kernel_size,
+                 filters,
+                 strides=(1, 1, 1),
+                 padding='same',
+                 depth_multiplier=1,
+                 activation=None,
+                 use_bias=True,
+                 depthwise_initializer='glorot_uniform',
+                 bias_initializer='zeros',
+                 dilation_rate=(1, 1, 1),
+                 depthwise_regularizer=None,
+                 depthwise_constraint=None,
+                 bias_constraint=None,
+                 w_initializer=None,
+                 w_regularizer=None,
+                 b_initializer=None,
+                 b_regularizer=None,
+                 name='depthwise_separable_conv3d'):
+
+        super().__init__(kernel_size,
+                         strides=strides,
+                         padding=padding,
+                         depth_multiplier=depth_multiplier,
+                         activation=activation,
+                         use_bias=use_bias,
+                         depthwise_initializer=depthwise_initializer,
+                         bias_initializer=bias_initializer,
+                         dilation_rate=dilation_rate,
+                         depthwise_regularizer=depthwise_regularizer,
+                         depthwise_constraint=depthwise_constraint,
+                         bias_constraint=bias_constraint,
+                         w_initializer=w_initializer,
+                         w_regularizer=w_regularizer,
+                         b_initializer=b_regularizer,
+                         b_regularizer=b_regularizer,
+                         name=name)
+        self.filters = filters
+
+    def layer_op(self, inputs, is_training):
+        if inputs.dtype == 'float64':
+            inputs = tf.cast(inputs, 'float32')
+
+        # shapes of inputs
+        b, d, h, w, c = inputs.shape
+
+        depthwise_kernel_shape = (self.kernel_size[0],
+                                  self.kernel_size[1],
+                                  self.kernel_size[2],
+                                  1,  # used on split channels
+                                  self.depth_multiplier)
+
+        depthwise_kernel = tf.get_variable(
+            'depthwise_kernel',
+            shape=depthwise_kernel_shape,
+            initializer=self.initializers['w'],
+            regularizer=self.regularizers['w'])
+
+        # mixing channels over each point
+        pointwise_kernel_shape = (1, 1, 1, self.depth_multiplier * c, self.filters)
+
+        pointwise_kernel = tf.get_variable(
+            'pointwise_kernel',
+            shape=pointwise_kernel_shape,
+            initializer=self.initializers['w'],
+            regularizer=self.regularizers['w'])
+
+        # depthwise bits
+        channels_l = [tf.expand_dims(inputs[:, :, :, :, i], -1) for i in range(0, c)]
+        dilation = (1,) + self.dilation_rate + (1,)
+
+        outputs = tf.convert_to_tensor(
+            [tf.nn.conv3d(inp_c, depthwise_kernel, strides=self._strides,
+                          padding=self._padding, dilations=dilation,
+                          data_format=self._data_format)
+             for inp_c in channels_l])
+
+        # Add original channels dim at the end of the tensor
+        outputs = tf.transpose(outputs, (1, 2, 3, 4, 5, 0))
+        # Convert to tensor [batch, depth, height, width, new_channels/depth_multiplier * original_channels]
+        shape = outputs.get_shape().as_list()
+
+        outputs = tf.reshape(outputs, [-1, shape[1], shape[2], shape[3], shape[4] * shape[5]])
+
+        # pointwise convolutions
+        outputs = tf.nn.conv3d(outputs, filter=pointwise_kernel, strides=(1, 1, 1, 1, 1),
+                               data_format=self._data_format, padding='VALID')
+
+        if self.activation is not None:
+            return self.activation(outputs)
+
+        return outputs
